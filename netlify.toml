@@ -1,0 +1,128 @@
+# netlify.toml — pianist.es
+# ══════════════════════════════════════════════════════════════
+# Build instellingen
+# ══════════════════════════════════════════════════════════════
+
+[build]
+  command   = "python build.py && python scripts/update_sitemap.py"
+  publish   = "."
+
+[build.environment]
+  PYTHON_VERSION = "3.11"
+
+# ══════════════════════════════════════════════════════════════
+# HTTP Headers — Security & Performance
+# ══════════════════════════════════════════════════════════════
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options         = "SAMEORIGIN"
+    X-Content-Type-Options  = "nosniff"
+    X-XSS-Protection        = "1; mode=block"
+    Referrer-Policy         = "strict-origin-when-cross-origin"
+    Permissions-Policy      = "camera=(), microphone=(), geolocation=()"
+
+[[headers]]
+  for = "/*.html"
+  [headers.values]
+    Cache-Control = "public, max-age=3600, must-revalidate"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/sitemap.xml"
+  [headers.values]
+    Content-Type  = "application/xml; charset=utf-8"
+    Cache-Control = "public, max-age=3600"
+
+# ══════════════════════════════════════════════════════════════
+# Redirects
+# ══════════════════════════════════════════════════════════════
+
+# ── Taal-detectie redirect op de root ────────────────────────
+# Bezoekers zonder taalvoorkeur of met ES → /  (al correct)
+# Bezoekers met NL browser → /nl/
+[[redirects]]
+  from       = "/"
+  to         = "/nl/"
+  status     = 302
+  conditions = {Language = ["nl"]}
+  force      = false
+
+# Bezoekers met DE browser → /de/
+[[redirects]]
+  from       = "/"
+  to         = "/de/"
+  status     = 302
+  conditions = {Language = ["de"]}
+  force      = false
+
+# Bezoekers met FR browser → /fr/
+[[redirects]]
+  from       = "/"
+  to         = "/fr/"
+  status     = 302
+  conditions = {Language = ["fr"]}
+  force      = false
+
+# Bezoekers met EN browser → /en/
+[[redirects]]
+  from       = "/"
+  to         = "/en/"
+  status     = 302
+  conditions = {Language = ["en"]}
+  force      = false
+
+# Bezoekers met RU browser → /ru/
+[[redirects]]
+  from       = "/"
+  to         = "/ru/"
+  status     = 302
+  conditions = {Language = ["ru"]}
+  force      = false
+
+# ── Blog-redirects: /blog/ → /es-blog/ (Spaanstalige blog is default) ───────
+# De root /blog/ verwijst naar de Spaanse blogversie (geen prefix)
+# Taalspecifieke blogs staan op /nl/blog/, /en/blog/ etc.
+
+# ── Verwijder trailing slash inconsistenties ─────────────────
+[[redirects]]
+  from   = "/nl"
+  to     = "/nl/"
+  status = 301
+
+[[redirects]]
+  from   = "/en"
+  to     = "/en/"
+  status = 301
+
+[[redirects]]
+  from   = "/de"
+  to     = "/de/"
+  status = 301
+
+[[redirects]]
+  from   = "/fr"
+  to     = "/fr/"
+  status = 301
+
+[[redirects]]
+  from   = "/ru"
+  to     = "/ru/"
+  status = 301
+
+# ── Oude enkeltaal-URL's omgeleid naar Spaanse versie ────────
+[[redirects]]
+  from   = "/index.html"
+  to     = "/"
+  status = 301
+
+# ── 404 fallback ─────────────────────────────────────────────
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 404
