@@ -1,0 +1,55 @@
+name: 🎹 Automatisch Blog Publiceren (Meertalig)
+
+on:
+  schedule:
+    - cron: '0 8 * * 1'   # elke maandag 10:00 Spanje
+  workflow_dispatch:
+    inputs:
+      force_slug:
+        description: 'Specifieke slug forceren (optioneel)'
+        required: false
+        default: ''
+
+jobs:
+  publish-blog:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Dependencies
+        run: pip install requests
+
+      - name: Genereer meertalige blogpagina's (6 talen)
+        env:
+          CONTENTFUL_SPACE_ID:     ${{ secrets.CONTENTFUL_SPACE_ID }}
+          CONTENTFUL_ACCESS_TOKEN: ${{ secrets.CONTENTFUL_ACCESS_TOKEN }}
+          CONTENTFUL_MGMT_TOKEN:   ${{ secrets.CONTENTFUL_MGMT_TOKEN }}
+          ANTHROPIC_API_KEY:       ${{ secrets.ANTHROPIC_API_KEY }}
+          FORCE_SLUG:              ${{ github.event.inputs.force_slug }}
+        run: python scripts/generate_blog.py
+
+      - name: Herbouw alle taalpagina's (hreflang bijwerken)
+        run: python build.py
+
+      - name: Sitemap bijwerken
+        run: python scripts/update_sitemap.py
+
+      - name: Push naar GitHub
+        run: |
+          git config user.name  "pianist-es-bot"
+          git config user.email "bot@pianist.es"
+          git add -A
+          git diff --staged --quiet || git commit -m "📝 Blog: $(cat /tmp/new_post_title.txt 2>/dev/null || echo 'nieuwe post') [6 talen]"
+          git push
+
+      - name: Netlify deploy
+        env:
+          NETLIFY_BUILD_HOOK: ${{ secrets.NETLIFY_BUILD_HOOK }}
+        run: curl -s -X POST "$NETLIFY_BUILD_HOOK"
