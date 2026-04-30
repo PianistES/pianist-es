@@ -2,20 +2,24 @@
 """
 generate_blog.py — Meertalige Blog Generator voor pianist.es
 ══════════════════════════════════════════════════════════════
-Voor elke blogpost worden 6 HTML-pagina's aangemaakt:
+Voor elke blogpost worden 6 HTML-pagina's aangemaakt met
+VERTAALDE SLUG per taal:
 
-  pianist.es/blog/[slug]/           ← Spaans (standaard)
-  pianist.es/en/blog/[slug]/        ← Engels
-  pianist.es/nl/blog/[slug]/        ← Nederlands
-  pianist.es/de/blog/[slug]/        ← Duits
-  pianist.es/fr/blog/[slug]/        ← Frans
-  pianist.es/ru/blog/[slug]/        ← Russisch
+  pianist.es/blog/pianista-boda-marbella/          ← Spaans
+  pianist.es/en/blog/pianist-wedding-marbella/     ← Engels
+  pianist.es/nl/blog/pianist-bruiloft-marbella/    ← Nederlands
+  pianist.es/de/blog/pianist-hochzeit-marbella/    ← Duits
+  pianist.es/fr/blog/pianiste-mariage-marbella/    ← Frans
+  pianist.es/ru/blog/pianist-svadba-marbella/      ← Russisch
+
+Elke pagina heeft hreflang-tags die naar alle andere taalversies verwijzen.
 """
 
-import os, re, json, requests
+import os, re, json, unicodedata, requests
 from datetime import date, datetime
 from pathlib import Path
 
+# ── Config ────────────────────────────────────────────────────────────────────
 CF_SPACE   = os.environ.get("CONTENTFUL_SPACE_ID", "")
 CF_TOKEN   = os.environ.get("CONTENTFUL_ACCESS_TOKEN", "")
 CF_MGMT    = os.environ.get("CONTENTFUL_MGMT_TOKEN", "")
@@ -24,9 +28,10 @@ FORCE_SLUG = os.environ.get("FORCE_SLUG", "").strip()
 SITE_URL   = "https://pianist.es"
 OUT_DIR    = Path(".")
 
-LANGS = ["es", "en", "nl", "de", "fr", "ru"]
-LANG_PREFIXES = {"es": "", "en": "en", "nl": "nl", "de": "de", "fr": "fr", "ru": "ru"}
-LANG_NAMES    = {"es":"Español","en":"English","nl":"Nederlands","de":"Deutsch","fr":"Français","ru":"Русский"}
+LANGS         = ["es", "en", "nl", "de", "fr", "ru"]
+LANG_PREFIXES = {"es":"", "en":"en", "nl":"nl", "de":"de", "fr":"fr", "ru":"ru"}
+LANG_NAMES    = {"es":"Español","en":"English","nl":"Nederlands",
+                 "de":"Deutsch","fr":"Français","ru":"Русский"}
 LANG_FLAGS    = {"es":"🇪🇸","en":"🇬🇧","nl":"🇳🇱","de":"🇩🇪","fr":"🇫🇷","ru":"🇷🇺"}
 
 SITE_CONTEXT = """pianist.es is de website van Thomas Verheul, een professionele pianist die optreedt
@@ -42,37 +47,58 @@ LANG_COPY = {
     "es": {"back":"← Volver a pianist.es","cta_h":"¿Contratar a Thomas para tu evento?",
            "cta_p":"Pianista profesional · Málaga, Marbella & toda España · +34 711 226 882",
            "cta_btn":"Solicitar presupuesto gratuito →","cta_url":"/","by":"Por Thomas Verheul",
-           "prompt":"Escribe en español correcto y fluido, con un tono cálido y profesional."},
+           "prompt":"Escribe en español correcto y fluido, con un tono cálido y profesional.",
+           "slug_instruction":"Traduce el slug al español. Usa solo letras minúsculas, números y guiones. Sin tildes ni caracteres especiales."},
     "en": {"back":"← Back to pianist.es","cta_h":"Book Thomas for your event?",
            "cta_p":"Professional pianist · Málaga, Marbella & all of Spain · +34 711 226 882",
            "cta_btn":"Request a free quote →","cta_url":"/en/","by":"By Thomas Verheul",
-           "prompt":"Write in correct, fluent British English with a warm, professional tone."},
+           "prompt":"Write in correct, fluent British English with a warm, professional tone.",
+           "slug_instruction":"Translate the slug to English. Use only lowercase letters, numbers and hyphens."},
     "nl": {"back":"← Terug naar pianist.es","cta_h":"Thomas boeken voor jouw evenement?",
            "cta_p":"Professioneel pianist · Málaga, Marbella & heel Spanje · +34 711 226 882",
            "cta_btn":"Vrijblijvende offerte aanvragen →","cta_url":"/nl/","by":"Door Thomas Verheul",
-           "prompt":"Schrijf in correct, vloeiend Nederlands met een warme, professionele toon."},
+           "prompt":"Schrijf in correct, vloeiend Nederlands met een warme, professionele toon.",
+           "slug_instruction":"Vertaal de slug naar het Nederlands. Gebruik alleen kleine letters, cijfers en koppeltekens."},
     "de": {"back":"← Zurück zu pianist.es","cta_h":"Thomas für Ihre Veranstaltung buchen?",
            "cta_p":"Professioneller Pianist · Málaga, Marbella & ganz Spanien · +34 711 226 882",
            "cta_btn":"Kostenloses Angebot anfragen →","cta_url":"/de/","by":"Von Thomas Verheul",
-           "prompt":"Schreibe in korrektem, flüssigem Deutsch mit einem warmen, professionellen Ton."},
+           "prompt":"Schreibe in korrektem, flüssigem Deutsch mit einem warmen, professionellen Ton.",
+           "slug_instruction":"Übersetze den Slug ins Deutsche. Nur Kleinbuchstaben, Zahlen und Bindestriche. Keine Umlaute."},
     "fr": {"back":"← Retour à pianist.es","cta_h":"Réserver Thomas pour votre événement ?",
            "cta_p":"Pianiste professionnel · Málaga, Marbella & toute l'Espagne · +34 711 226 882",
            "cta_btn":"Demander un devis gratuit →","cta_url":"/fr/","by":"Par Thomas Verheul",
-           "prompt":"Écris en français correct et fluide avec un ton chaleureux et professionnel."},
+           "prompt":"Écris en français correct et fluide avec un ton chaleureux et professionnel.",
+           "slug_instruction":"Traduis le slug en français. Utilise uniquement des minuscules, chiffres et tirets. Sans accents."},
     "ru": {"back":"← Вернуться на pianist.es","cta_h":"Забронировать Томаса для вашего мероприятия?",
            "cta_p":"Профессиональный пианист · Малага, Марбелья & вся Испания · +34 711 226 882",
            "cta_btn":"Запросить бесплатное предложение →","cta_url":"/ru/","by":"Автор: Томас Верхёль",
-           "prompt":"Пиши на правильном, беглом русском языке с тёплым, профессиональным тоном."},
+           "prompt":"Пиши на правильном, беглом русском языке с тёплым, профессиональным тоном.",
+           "slug_instruction":"Transliterate/translate the slug to a URL-friendly Russian slug using Latin characters (transliteration). Only lowercase letters, numbers and hyphens."},
 }
 
-def cf_fetch(params):
-    r = requests.get(f"https://cdn.contentful.com/spaces/{CF_SPACE}/entries",
-                     params={"access_token": CF_TOKEN, **params}, timeout=30)
+# ── Slug helper ───────────────────────────────────────────────────────────────
+def slugify(text: str) -> str:
+    """Zet een tekst om naar een URL-vriendelijke slug."""
+    # Normaliseer unicode (verwijder accenten)
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(c for c in text if not unicodedata.combining(c))
+    text = text.lower()
+    text = re.sub(r"[^a-z0-9\s-]", "", text)
+    text = re.sub(r"[\s_]+", "-", text.strip())
+    text = re.sub(r"-+", "-", text)
+    return text[:80].strip("-")
+
+# ── Contentful ────────────────────────────────────────────────────────────────
+def cf_fetch(params: dict) -> dict:
+    r = requests.get(
+        f"https://cdn.contentful.com/spaces/{CF_SPACE}/entries",
+        params={"access_token": CF_TOKEN, **params}, timeout=30)
     r.raise_for_status()
     return r.json()
 
-def get_next_post():
-    params = {"content_type":"blogPost","fields.status":"planned","order":"fields.publishDate","limit":1}
+def get_next_post() -> dict:
+    params = {"content_type":"blogPost","fields.status":"planned",
+              "order":"fields.publishDate","limit":1}
     if FORCE_SLUG:
         params = {"content_type":"blogPost","fields.slug":FORCE_SLUG,"limit":1}
     data  = cf_fetch(params)
@@ -87,94 +113,190 @@ def get_next_post():
         if isinstance(v, dict):
             return v.get("nl") or v.get("en") or list(v.values())[0]
         return v or default
-    return {"id":entry["sys"]["id"],"slug":field("slug"),"title":field("title"),
-            "category":field("category","Blog"),"excerpt":field("excerpt",""),
-            "date":field("publishDate", date.today().isoformat())}
+    return {
+        "id":       entry["sys"]["id"],
+        "slug":     field("slug"),        # de NL bronslug uit Contentful
+        "title":    field("title"),
+        "category": field("category", "Blog"),
+        "excerpt":  field("excerpt", ""),
+        "date":     field("publishDate", date.today().isoformat()),
+    }
 
-def write_blog_in_lang(post, lang):
+# ── Claude API: blog tekst + slug + titel in één call ────────────────────────
+def write_blog_in_lang(post: dict, lang: str) -> dict:
+    """
+    Vraagt Claude om:
+      1. Een vertaalde slug (URL-vriendelijk)
+      2. Een vertaalde blogtitel
+      3. De volledige blogtekst als HTML
+
+    Geeft een dict terug: {"slug": str, "title": str, "content": str}
+    """
     c = LANG_COPY[lang]
+
     prompt = f"""Je schrijft een blogpost voor pianist.es van Thomas Verheul.
 
-CONTEXT: {SITE_CONTEXT}
+CONTEXT OVER THOMAS:
+{SITE_CONTEXT}
 
-BLOGTITEL (vertaal naar {LANG_NAMES[lang]}): {post['title']}
+ORIGINELE BLOGTITEL (NL): {post['title']}
+ORIGINELE SLUG (NL): {post['slug']}
 CATEGORIE: {post['category']}
 
-INSTRUCTIES:
+TAAK:
+Geef je antwoord als JSON met exact deze 3 velden:
+
+{{
+  "slug": "...",
+  "title": "...",
+  "content": "..."
+}}
+
+INSTRUCTIES PER VELD:
+
+slug:
+- {c['slug_instruction']}
+- Vertaal de betekenis van de originele slug naar {LANG_NAMES[lang]}
+- Voorbeeld: "pianist-bruiloft-marbella" → ES: "pianista-boda-marbella", FR: "pianiste-mariage-marbella"
+- Max 70 tekens, alleen a-z, 0-9 en koppeltekens
+
+title:
+- Vertaal de blogtitel naar {LANG_NAMES[lang]}
+- Maak hem SEO-sterk en aantrekkelijk
+- {c['prompt']}
+
+content:
 - {c['prompt']}
 - 850-1100 woorden
-- SEO: gebruik de hoofdzoekterm 4-6x
-- Structuur: inleiding, 3-5 <h2>-kopjes, conclusie met CTA naar pianist.es of WhatsApp +34 711 226 882
-- Geef ALLEEN HTML-body content (<h2>, <p>, <ul> etc.)
+- SEO: gebruik de hoofdzoekterm 4-6x naturlijk
+- Structuur: inleiding (1-2 alinea's), 3-5 <h2>-kopjes elk 2-3 alinea's, afsluitende alinea
+- Sluit af met uitnodiging om contact op te nemen via pianist.es of WhatsApp +34 711 226 882
+- Alleen HTML-body content (<h2>, <p>, <ul>, <strong> etc.) — geen <html>/<head>/<body>
 - Begin direct met <p>
 
-Schrijf nu:"""
-    r = requests.post("https://api.anthropic.com/v1/messages",
-        headers={"x-api-key":CLAUDE_KEY,"anthropic-version":"2023-06-01","content-type":"application/json"},
-        json={"model":"claude-sonnet-4-20250514","max_tokens":2000,
-              "messages":[{"role":"user","content":prompt}]}, timeout=120)
-    r.raise_for_status()
-    return r.json()["content"][0]["text"].strip()
+Geef ALLEEN het JSON object terug, zonder uitleg of markdown code blocks."""
 
-def blog_url(lang, slug):
+    r = requests.post(
+        "https://api.anthropic.com/v1/messages",
+        headers={"x-api-key": CLAUDE_KEY,
+                 "anthropic-version": "2023-06-01",
+                 "content-type": "application/json"},
+        json={"model": "claude-sonnet-4-20250514", "max_tokens": 2500,
+              "messages": [{"role": "user", "content": prompt}]},
+        timeout=120)
+    r.raise_for_status()
+
+    raw = r.json()["content"][0]["text"].strip()
+
+    # Verwijder eventuele ```json ... ``` wrappers
+    raw = re.sub(r"^```(?:json)?\s*", "", raw)
+    raw = re.sub(r"\s*```$", "", raw)
+
+    try:
+        data = json.loads(raw)
+        # Valideer en herstel slug als die ongeldig is
+        slug = slugify(data.get("slug", ""))
+        if not slug:
+            slug = slugify(post["slug"])   # fallback naar origineel
+        return {
+            "slug":    slug,
+            "title":   data.get("title", post["title"]).strip(),
+            "content": data.get("content", "").strip(),
+        }
+    except json.JSONDecodeError:
+        # Fallback: probeer slug en titel te extraheren uit tekst
+        print(f"  ⚠️  JSON parse mislukt voor {lang}, gebruik fallback")
+        slug = slugify(post["slug"])
+        return {
+            "slug":    slug,
+            "title":   post["title"],
+            "content": raw,
+        }
+
+# ── URL helpers ───────────────────────────────────────────────────────────────
+def blog_url(lang: str, slug: str) -> str:
     p = LANG_PREFIXES[lang]
     return f"{SITE_URL}/{p}/blog/{slug}/" if p else f"{SITE_URL}/blog/{slug}/"
 
-def blog_out_path(lang, slug):
+def blog_out_path(lang: str, slug: str) -> Path:
     p = LANG_PREFIXES[lang]
-    return OUT_DIR / p / "blog" / slug / "index.html" if p else OUT_DIR / "blog" / slug / "index.html"
+    return OUT_DIR / p / "blog" / slug / "index.html" if p \
+           else OUT_DIR / "blog" / slug / "index.html"
 
-def format_date(iso_str, lang):
+# ── Datum formatter ───────────────────────────────────────────────────────────
+def format_date(iso_str: str, lang: str) -> str:
     try:
         d = datetime.fromisoformat(iso_str[:10])
-        months = {"nl":["jan","feb","mrt","apr","mei","jun","jul","aug","sep","okt","nov","dec"],
-                  "en":["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"],
-                  "es":["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"],
-                  "de":["Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"],
-                  "fr":["jan","fév","mar","avr","mai","jun","jul","aoû","sep","oct","nov","déc"],
-                  "ru":["янв","фев","мар","апр","май","июн","июл","авг","сен","окт","ноя","дек"]}
+        months = {
+            "nl": ["jan","feb","mrt","apr","mei","jun","jul","aug","sep","okt","nov","dec"],
+            "en": ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"],
+            "es": ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"],
+            "de": ["Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"],
+            "fr": ["jan","fév","mar","avr","mai","jun","jul","aoû","sep","oct","nov","déc"],
+            "ru": ["янв","фев","мар","апр","май","июн","июл","авг","сен","окт","ноя","дек"],
+        }
         m = months.get(lang, months["en"])
         return f"{d.day} {m[d.month-1]} {d.year}"
-    except:
+    except Exception:
         return iso_str
 
-def build_hreflang(slug):
-    lines = [f'  <link rel="alternate" hreflang="{lg}" href="{blog_url(lg, slug)}">' for lg in LANGS]
-    lines.append(f'  <link rel="alternate" hreflang="x-default" href="{blog_url("es", slug)}">')
+# ── hreflang tags — verwijzen naar de VERTAALDE slug per taal ────────────────
+def build_hreflang(lang_slugs: dict) -> str:
+    """lang_slugs = {"es": "pianista-boda-marbella", "nl": "pianist-bruiloft-marbella", ...}"""
+    lines = []
+    for lang in LANGS:
+        slug = lang_slugs.get(lang, lang_slugs.get("nl", ""))
+        lines.append(f'  <link rel="alternate" hreflang="{lang}" href="{blog_url(lang, slug)}">')
+    # x-default → Spaans
+    es_slug = lang_slugs.get("es", lang_slugs.get("nl", ""))
+    lines.append(f'  <link rel="alternate" hreflang="x-default" href="{blog_url("es", es_slug)}">')
     return "\n".join(lines)
 
-def build_lang_switcher(slug, current_lang):
+# ── Taalschakelaar met correcte vertaalde URL per taal ───────────────────────
+def build_lang_switcher(lang_slugs: dict, current_lang: str) -> str:
     items = []
     for lang in LANGS:
+        slug   = lang_slugs.get(lang, lang_slugs.get("nl", ""))
+        url    = blog_url(lang, slug)
         active = ' style="font-weight:700;color:var(--gold-dark);"' if lang == current_lang else ''
-        items.append(f'<a href="{blog_url(lang, slug)}"{active}>{LANG_FLAGS[lang]} {LANG_NAMES[lang]}</a>')
+        items.append(f'<a href="{url}"{active}>{LANG_FLAGS[lang]} {LANG_NAMES[lang]}</a>')
     return " · ".join(items)
 
-def build_html(post, lang, content_html, title_translated):
-    c         = LANG_COPY[lang]
-    slug      = post["slug"]
-    canonical = blog_url(lang, slug)
-    date_fmt  = format_date(post["date"], lang)
-    hreflang  = build_hreflang(slug)
-    lang_sw   = build_lang_switcher(slug, lang)
-    clean     = re.sub(r'<[^>]+>', '', content_html)
-    meta_desc = clean[:157].rstrip() + "…"
-    schema    = json.dumps({"@context":"https://schema.org","@type":"BlogPosting",
-        "headline":title_translated,"datePublished":post["date"][:10],
-        "inLanguage":lang,"author":{"@type":"Person","name":"Thomas Verheul","url":SITE_URL},
-        "publisher":{"@type":"Organization","name":"pianist.es","url":SITE_URL},
-        "url":canonical,"description":meta_desc}, ensure_ascii=False, indent=2)
+# ── HTML pagina builder ───────────────────────────────────────────────────────
+def build_html(post: dict, lang: str, result: dict, lang_slugs: dict) -> str:
+    c            = LANG_COPY[lang]
+    slug         = result["slug"]
+    title        = result["title"]
+    content_html = result["content"]
+    canonical    = blog_url(lang, slug)
+    date_fmt     = format_date(post["date"], lang)
+    hreflang     = build_hreflang(lang_slugs)
+    lang_sw      = build_lang_switcher(lang_slugs, lang)
+    clean        = re.sub(r'<[^>]+>', '', content_html)
+    meta_desc    = clean[:157].rstrip() + "…"
+
+    schema = json.dumps({
+        "@context":       "https://schema.org",
+        "@type":          "BlogPosting",
+        "headline":       title,
+        "datePublished":  post["date"][:10],
+        "inLanguage":     lang,
+        "author":         {"@type": "Person", "name": "Thomas Verheul", "url": SITE_URL},
+        "publisher":      {"@type": "Organization", "name": "pianist.es", "url": SITE_URL},
+        "url":            canonical,
+        "description":    meta_desc,
+    }, ensure_ascii=False, indent=2)
 
     return f"""<!DOCTYPE html>
 <html lang="{lang}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{title_translated} | pianist.es</title>
+<title>{title} | pianist.es</title>
 <meta name="description" content="{meta_desc}">
 <link rel="canonical" href="{canonical}">
 {hreflang}
-<meta property="og:title" content="{title_translated}">
+<meta property="og:title" content="{title}">
 <meta property="og:description" content="{meta_desc}">
 <meta property="og:type" content="article">
 <meta property="og:url" content="{canonical}">
@@ -228,7 +350,7 @@ footer a{{color:var(--gold);text-decoration:none;}}
 </div>
 <article>
   <div class="eyebrow">{post['category']}</div>
-  <h1>{title_translated}</h1>
+  <h1>{title}</h1>
   <div class="meta">{c['by']} · {date_fmt}</div>
   <div class="content">{content_html}</div>
   <div class="cta">
@@ -241,65 +363,94 @@ footer a{{color:var(--gold);text-decoration:none;}}
 </body>
 </html>"""
 
-def update_blog_index(post, titles):
+# ── Blog-index bijwerken (JSON bestand dat de site gebruikt) ──────────────────
+def update_blog_index(post: dict, results: dict, lang_slugs: dict):
     index_path = OUT_DIR / "blog-index.json"
     try:
         index = json.loads(index_path.read_text()) if index_path.exists() else []
-    except:
+    except Exception:
         index = []
-    entry = {"slug":post["slug"],"date":post["date"][:10],"category":post["category"],
-             "titles":titles,"urls":{lg:blog_url(lg,post["slug"]) for lg in LANGS}}
-    existing = next((i for i,e in enumerate(index) if e["slug"]==post["slug"]), None)
+
+    entry = {
+        "source_slug": post["slug"],
+        "date":        post["date"][:10],
+        "category":    post["category"],
+        "slugs":       lang_slugs,
+        "titles":      {lang: results[lang]["title"] for lang in LANGS},
+        "urls":        {lang: blog_url(lang, lang_slugs[lang]) for lang in LANGS},
+    }
+    existing = next((i for i, e in enumerate(index)
+                     if e.get("source_slug") == post["slug"]), None)
     if existing is not None:
         index[existing] = entry
     else:
         index.insert(0, entry)
-    index_path.write_text(json.dumps(index, ensure_ascii=False, indent=2))
-    print(f"  ✅ blog-index.json ({len(index)} posts)")
 
-def mark_published(entry_id):
+    index_path.write_text(json.dumps(index, ensure_ascii=False, indent=2))
+    print(f"  ✅ blog-index.json bijgewerkt ({len(index)} posts)")
+
+# ── Contentful: markeer als gepubliceerd ──────────────────────────────────────
+def mark_published(entry_id: str):
     if not CF_MGMT:
         return
     r = requests.get(
         f"https://api.contentful.com/spaces/{CF_SPACE}/environments/master/entries/{entry_id}",
-        headers={"Authorization":f"Bearer {CF_MGMT}"})
+        headers={"Authorization": f"Bearer {CF_MGMT}"})
     if not r.ok:
         return
     version = r.json()["sys"]["version"]
     requests.patch(
         f"https://api.contentful.com/spaces/{CF_SPACE}/environments/master/entries/{entry_id}",
-        headers={"Authorization":f"Bearer {CF_MGMT}",
-                 "Content-Type":"application/vnd.contentful.management.v1+json",
-                 "X-Contentful-Version":str(version)},
-        json={"fields":{"status":{"nl":"published","en":"published"}}})
+        headers={
+            "Authorization":    f"Bearer {CF_MGMT}",
+            "Content-Type":     "application/vnd.contentful.management.v1+json",
+            "X-Contentful-Version": str(version),
+        },
+        json={"fields": {"status": {"nl": "published", "en": "published"}}},
+    )
+    print(f"  ✅ Contentful entry {entry_id} → published")
 
+# ── Main ──────────────────────────────────────────────────────────────────────
 def main():
-    print("🎹 Meertalige Blog Generator — pianist.es\n")
+    print("🎹 Meertalige Blog Generator (met vertaalde slugs) — pianist.es\n")
+
     post = get_next_post()
-    print(f"📝 '{post['title']}' (slug: {post['slug']})\n")
+    print(f"📝 '{post['title']}' (bron-slug: {post['slug']})\n")
+    print("🤖 Claude schrijft blog + slug + titel in 6 talen...\n")
 
-    contents, titles = {}, {}
+    results    = {}   # lang → {"slug", "title", "content"}
+    lang_slugs = {}   # lang → slug
+
     for lang in LANGS:
-        print(f"  🤖 {lang.upper()}...", end=" ", flush=True)
-        content_html = write_blog_in_lang(post, lang)
-        m = re.search(r'<h1[^>]*>(.*?)</h1>', content_html, re.DOTALL)
-        title_lang = re.sub(r'<[^>]+>', '', m.group(1)).strip() if m else post["title"]
-        contents[lang] = content_html
-        titles[lang]   = title_lang
-        print(f"✅ '{title_lang[:50]}...'")
+        print(f"  [{lang.upper()}]", end=" ", flush=True)
+        result = write_blog_in_lang(post, lang)
+        results[lang]    = result
+        lang_slugs[lang] = result["slug"]
+        print(f"slug: {result['slug'][:45]}  |  titel: {result['title'][:45]}...")
 
     print()
+    print("📄 HTML-pagina's aanmaken...\n")
+
     for lang in LANGS:
-        out = blog_out_path(lang, post["slug"])
+        out = blog_out_path(lang, lang_slugs[lang])
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(build_html(post, lang, contents[lang], titles[lang]), encoding="utf-8")
-        print(f"  📄 {blog_url(lang, post['slug'])}")
+        html = build_html(post, lang, results[lang], lang_slugs)
+        out.write_text(html, encoding="utf-8")
+        url = blog_url(lang, lang_slugs[lang])
+        print(f"  {LANG_FLAGS[lang]}  {url}")
 
     print()
-    update_blog_index(post, titles)
+    update_blog_index(post, results, lang_slugs)
     mark_published(post["id"])
-    Path("/tmp/new_post_title.txt").write_text(titles.get("nl") or titles.get("en") or post["title"])
-    print(f"\n🎉 Klaar! 6 pagina's aangemaakt.")
+
+    # Sla NL titel op voor git commit bericht
+    nl_title = results.get("nl", {}).get("title") or results.get("en", {}).get("title") or post["title"]
+    Path("/tmp/new_post_title.txt").write_text(nl_title)
+
+    print(f"\n🎉 Klaar! 6 pagina's aangemaakt met taalspecifieke URLs.")
+    print("\nURL-overzicht:")
+    for lang in LANGS:
+        print(f"  {LANG_FLAGS[lang]}  {blog_url(lang, lang_slugs[lang])}")
 
 if __name__ == "__main__":
     main()
