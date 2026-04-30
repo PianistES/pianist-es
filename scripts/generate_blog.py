@@ -181,7 +181,7 @@ Geef ALLEEN het JSON object terug, zonder uitleg of markdown code blocks."""
         headers={"x-api-key": CLAUDE_KEY,
                  "anthropic-version": "2023-06-01",
                  "content-type": "application/json"},
-        json={"model": "claude-sonnet-4-20250514", "max_tokens": 2500,
+        json={"model": "claude-sonnet-4-5", "max_tokens": 2500,
               "messages": [{"role": "user", "content": prompt}]},
         timeout=120)
     r.raise_for_status()
