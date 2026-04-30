@@ -1,0 +1,15 @@
+# robots.txt for pianist.es
+# Allow all search engines to index the site
+
+User-agent: *
+Allow: /
+
+# Block common admin / build / CMS paths (no harm if they don't exist)
+Disallow: /admin/
+Disallow: /.git/
+Disallow: /.github/
+Disallow: /scripts/
+Disallow: /node_modules/
+
+# Sitemap location
+Sitemap: https://pianist.es/sitemap.xml
