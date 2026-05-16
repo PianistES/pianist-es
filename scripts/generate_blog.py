@@ -1,456 +1,776 @@
 #!/usr/bin/env python3
 """
-generate_blog.py — Meertalige Blog Generator voor pianist.es
-══════════════════════════════════════════════════════════════
-Voor elke blogpost worden 6 HTML-pagina's aangemaakt met
-VERTAALDE SLUG per taal:
+generate_blog.py — pianist.es Meertalige Blog Generator
+═══════════════════════════════════════════════════════════
+Haalt nieuwe Nederlandse blogposts op uit Contentful (language=nl, status=published),
+vertaalt ze naar 5 talen via Claude, en genereert HTML-pagina's per taal.
 
-  pianist.es/blog/pianista-boda-marbella/          ← Spaans
-  pianist.es/en/blog/pianist-wedding-marbella/     ← Engels
-  pianist.es/nl/blog/pianist-bruiloft-marbella/    ← Nederlands
-  pianist.es/de/blog/pianist-hochzeit-marbella/    ← Duits
-  pianist.es/fr/blog/pianiste-mariage-marbella/    ← Frans
-  pianist.es/ru/blog/pianist-svadba-marbella/      ← Russisch
+Ondersteunt:
+- thumbnail (Contentful Media veld)
+- body (Contentful Rich Text veld)  ← nieuw
+- title, slug, excerpt, category, publishDate
 
-Elke pagina heeft hreflang-tags die naar alle andere taalversies verwijzen.
+Gebruik: python scripts/generate_blog.py
 """
 
-import os, re, json, unicodedata, requests
-from datetime import date, datetime
+import os
+import re
+import json
+import time
+import html as html_lib
 from pathlib import Path
+from datetime import datetime, date
+
+import requests
 
 # ── Config ────────────────────────────────────────────────────────────────────
-CF_SPACE   = os.environ.get("CONTENTFUL_SPACE_ID", "")
-CF_TOKEN   = os.environ.get("CONTENTFUL_ACCESS_TOKEN", "")
-CF_MGMT    = os.environ.get("CONTENTFUL_MGMT_TOKEN", "")
-CLAUDE_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-FORCE_SLUG = os.environ.get("FORCE_SLUG", "").strip()
-SITE_URL   = "https://pianist.es"
-OUT_DIR    = Path(".")
+SPACE_ID      = os.environ["CONTENTFUL_SPACE_ID"]
+ACCESS_TOKEN  = os.environ["CONTENTFUL_ACCESS_TOKEN"]
+ANTHROPIC_KEY = os.environ["ANTHROPIC_API_KEY"]
+FORCE_SLUG    = os.environ.get("FORCE_SLUG", "").strip()
+SITE_URL      = "https://pianist.es"
 
-LANGS         = ["es", "en", "nl", "de", "fr", "ru"]
-LANG_PREFIXES = {"es":"", "en":"en", "nl":"nl", "de":"de", "fr":"fr", "ru":"ru"}
-LANG_NAMES    = {"es":"Español","en":"English","nl":"Nederlands",
-                 "de":"Deutsch","fr":"Français","ru":"Русский"}
-LANG_FLAGS    = {"es":"🇪🇸","en":"🇬🇧","nl":"🇳🇱","de":"🇩🇪","fr":"🇫🇷","ru":"🇷🇺"}
-
-SITE_CONTEXT = """pianist.es is de website van Thomas Verheul, een professionele pianist die optreedt
-bij bruiloften, bedrijfsevenementen, galadìners en privéfeesten in Málaga, Marbella,
-de Costa del Sol en heel Spanje. Thomas heeft meer dan 20 jaar internationale ervaring,
-woonde 4 jaar op Bali, spreekt Nederlands, Engels, Duits, Spaans en Indonesisch.
-Hij brengt zijn eigen professionele digitale piano en geluidsset mee (geschikt voor 200 personen),
-maar regelt ook een vleugel of staande piano op locatie. Zijn repertoire omvat jazz, klassiek, pop,
-filmmuziek, bossa nova, blues, soul en bekende covers. Tarieven: €490 voor het eerste uur, €95
-per extra uur. Reiskosten €0,50/km vanaf Málaga. Boeken via pianist.es of WhatsApp +34 711 226 882."""
-
-LANG_COPY = {
-    "es": {"back":"← Volver a pianist.es","cta_h":"¿Contratar a Thomas para tu evento?",
-           "cta_p":"Pianista profesional · Málaga, Marbella & toda España · +34 711 226 882",
-           "cta_btn":"Solicitar presupuesto gratuito →","cta_url":"/","by":"Por Thomas Verheul",
-           "prompt":"Escribe en español correcto y fluido, con un tono cálido y profesional.",
-           "slug_instruction":"Traduce el slug al español. Usa solo letras minúsculas, números y guiones. Sin tildes ni caracteres especiales."},
-    "en": {"back":"← Back to pianist.es","cta_h":"Book Thomas for your event?",
-           "cta_p":"Professional pianist · Málaga, Marbella & all of Spain · +34 711 226 882",
-           "cta_btn":"Request a free quote →","cta_url":"/en/","by":"By Thomas Verheul",
-           "prompt":"Write in correct, fluent British English with a warm, professional tone.",
-           "slug_instruction":"Translate the slug to English. Use only lowercase letters, numbers and hyphens."},
-    "nl": {"back":"← Terug naar pianist.es","cta_h":"Thomas boeken voor jouw evenement?",
-           "cta_p":"Professioneel pianist · Málaga, Marbella & heel Spanje · +34 711 226 882",
-           "cta_btn":"Vrijblijvende offerte aanvragen →","cta_url":"/nl/","by":"Door Thomas Verheul",
-           "prompt":"Schrijf in correct, vloeiend Nederlands met een warme, professionele toon.",
-           "slug_instruction":"Vertaal de slug naar het Nederlands. Gebruik alleen kleine letters, cijfers en koppeltekens."},
-    "de": {"back":"← Zurück zu pianist.es","cta_h":"Thomas für Ihre Veranstaltung buchen?",
-           "cta_p":"Professioneller Pianist · Málaga, Marbella & ganz Spanien · +34 711 226 882",
-           "cta_btn":"Kostenloses Angebot anfragen →","cta_url":"/de/","by":"Von Thomas Verheul",
-           "prompt":"Schreibe in korrektem, flüssigem Deutsch mit einem warmen, professionellen Ton.",
-           "slug_instruction":"Übersetze den Slug ins Deutsche. Nur Kleinbuchstaben, Zahlen und Bindestriche. Keine Umlaute."},
-    "fr": {"back":"← Retour à pianist.es","cta_h":"Réserver Thomas pour votre événement ?",
-           "cta_p":"Pianiste professionnel · Málaga, Marbella & toute l'Espagne · +34 711 226 882",
-           "cta_btn":"Demander un devis gratuit →","cta_url":"/fr/","by":"Par Thomas Verheul",
-           "prompt":"Écris en français correct et fluide avec un ton chaleureux et professionnel.",
-           "slug_instruction":"Traduis le slug en français. Utilise uniquement des minuscules, chiffres et tirets. Sans accents."},
-    "ru": {"back":"← Вернуться на pianist.es","cta_h":"Забронировать Томаса для вашего мероприятия?",
-           "cta_p":"Профессиональный пианист · Малага, Марбелья & вся Испания · +34 711 226 882",
-           "cta_btn":"Запросить бесплатное предложение →","cta_url":"/ru/","by":"Автор: Томас Верхёль",
-           "prompt":"Пиши на правильном, беглом русском языке с тёплым, профессиональным тоном.",
-           "slug_instruction":"Transliterate/translate the slug to a URL-friendly Russian slug using Latin characters (transliteration). Only lowercase letters, numbers and hyphens."},
+LANGS = {
+    "es": {"prefix": "",    "html_lang": "es", "label": "Español",    "flag": "🇪🇸"},
+    "en": {"prefix": "en",  "html_lang": "en", "label": "English",    "flag": "🇬🇧"},
+    "nl": {"prefix": "nl",  "html_lang": "nl", "label": "Nederlands", "flag": "🇳🇱"},
+    "de": {"prefix": "de",  "html_lang": "de", "label": "Deutsch",    "flag": "🇩🇪"},
+    "fr": {"prefix": "fr",  "html_lang": "fr", "label": "Français",   "flag": "🇫🇷"},
+    "ru": {"prefix": "ru",  "html_lang": "ru", "label": "Русский",    "flag": "🇷🇺"},
 }
 
-# ── Slug helper ───────────────────────────────────────────────────────────────
-def slugify(text: str) -> str:
-    """Zet een tekst om naar een URL-vriendelijke slug."""
-    # Normaliseer unicode (verwijder accenten)
-    text = unicodedata.normalize("NFKD", text)
-    text = "".join(c for c in text if not unicodedata.combining(c))
-    text = text.lower()
-    text = re.sub(r"[^a-z0-9\s-]", "", text)
-    text = re.sub(r"[\s_]+", "-", text.strip())
-    text = re.sub(r"-+", "-", text)
-    return text[:80].strip("-")
+BLOG_INDEX = Path("blog-index.json")
 
-# ── Contentful ────────────────────────────────────────────────────────────────
-def cf_fetch(params: dict) -> dict:
-    r = requests.get(
-        f"https://cdn.contentful.com/spaces/{CF_SPACE}/entries",
-        params={"access_token": CF_TOKEN, **params}, timeout=30)
+# ── Contentful ophalen ────────────────────────────────────────────────────────
+def fetch_contentful(extra_params=""):
+    url = (
+        f"https://cdn.contentful.com/spaces/{SPACE_ID}/entries"
+        f"?access_token={ACCESS_TOKEN}"
+        f"&content_type=blogPost"
+        f"&fields.language=nl"
+        f"&fields.status=published"
+        f"&include=2"
+        f"&order=-fields.publishDate"
+        f"{extra_params}"
+    )
+    r = requests.get(url, timeout=30)
     r.raise_for_status()
     return r.json()
 
-def get_next_post() -> dict:
-    params = {"content_type":"blogPost","fields.status":"planned",
-              "order":"fields.publishDate","limit":1}
-    if FORCE_SLUG:
-        params = {"content_type":"blogPost","fields.slug":FORCE_SLUG,"limit":1}
-    data  = cf_fetch(params)
-    items = data.get("items", [])
-    if not items:
-        print("Geen geplande posts gevonden.")
-        exit(0)
-    entry = items[0]
-    f = entry["fields"]
-    def field(key, default=""):
-        v = f.get(key, default)
-        if isinstance(v, dict):
-            return v.get("nl") or v.get("en") or list(v.values())[0]
-        return v or default
-    return {
-        "id":       entry["sys"]["id"],
-        "slug":     field("slug"),        # de NL bronslug uit Contentful
-        "title":    field("title"),
-        "category": field("category", "Blog"),
-        "excerpt":  field("excerpt", ""),
-        "date":     field("publishDate", date.today().isoformat()),
-    }
 
-# ── Claude API: blog tekst + slug + titel in één call ────────────────────────
-def write_blog_in_lang(post: dict, lang: str) -> dict:
+def get_asset_url(data, asset_id):
+    """Haal de URL op van een Contentful asset uit de includes."""
+    for asset in data.get("includes", {}).get("Asset", []):
+        if asset["sys"]["id"] == asset_id:
+            file_url = asset.get("fields", {}).get("file", {}).get("url", "")
+            if file_url.startswith("//"):
+                return "https:" + file_url
+            return file_url
+    return ""
+
+
+def rich_text_to_html(node):
     """
-    Vraagt Claude om:
-      1. Een vertaalde slug (URL-vriendelijk)
-      2. Een vertaalde blogtitel
-      3. De volledige blogtekst als HTML
-
-    Geeft een dict terug: {"slug": str, "title": str, "content": str}
+    Converteert een Contentful Rich Text document-node naar HTML.
+    Ondersteunt: paragraph, heading-2..6, hyperlink, bold, italic,
+                 unordered-list, ordered-list, list-item, hr, blockquote.
     """
-    c = LANG_COPY[lang]
+    if not node:
+        return ""
 
-    prompt = f"""Je schrijft een blogpost voor pianist.es van Thomas Verheul.
+    node_type = node.get("nodeType", "")
+    content   = node.get("content", [])
 
-CONTEXT OVER THOMAS:
-{SITE_CONTEXT}
+    # ── Inline nodes ──────────────────────────────────────────────────────────
+    if node_type == "text":
+        text = html_lib.escape(node.get("value", ""))
+        for mark in node.get("marks", []):
+            t = mark.get("type", "")
+            if t == "bold":
+                text = f"<strong>{text}</strong>"
+            elif t == "italic":
+                text = f"<em>{text}</em>"
+            elif t == "underline":
+                text = f"<u>{text}</u>"
+            elif t == "code":
+                text = f"<code>{text}</code>"
+        return text
 
-ORIGINELE BLOGTITEL (NL): {post['title']}
-ORIGINELE SLUG (NL): {post['slug']}
-CATEGORIE: {post['category']}
+    if node_type == "hyperlink":
+        href = html_lib.escape(node.get("data", {}).get("uri", "#"))
+        inner = "".join(rich_text_to_html(c) for c in content)
+        return f'<a href="{href}" target="_blank" rel="noopener">{inner}</a>'
 
-TAAK:
-Geef je antwoord als JSON met exact deze 3 velden:
+    # ── Block nodes ───────────────────────────────────────────────────────────
+    inner = "".join(rich_text_to_html(c) for c in content)
 
+    if node_type == "document":
+        return inner
+
+    if node_type == "paragraph":
+        stripped = inner.strip()
+        return f"<p>{stripped}</p>\n" if stripped else ""
+
+    if node_type == "heading-2":
+        return f"<h2>{inner}</h2>\n"
+    if node_type == "heading-3":
+        return f"<h3>{inner}</h3>\n"
+    if node_type == "heading-4":
+        return f"<h4>{inner}</h4>\n"
+    if node_type == "heading-5":
+        return f"<h5>{inner}</h5>\n"
+    if node_type == "heading-6":
+        return f"<h6>{inner}</h6>\n"
+
+    if node_type == "unordered-list":
+        return f"<ul>\n{inner}</ul>\n"
+    if node_type == "ordered-list":
+        return f"<ol>\n{inner}</ol>\n"
+    if node_type == "list-item":
+        return f"  <li>{inner.strip()}</li>\n"
+
+    if node_type == "blockquote":
+        return f"<blockquote>{inner}</blockquote>\n"
+
+    if node_type == "hr":
+        return "<hr>\n"
+
+    if node_type == "embedded-asset-block":
+        asset_id = node.get("data", {}).get("target", {}).get("sys", {}).get("id", "")
+        # Asset URL is resolved separately; here we emit a placeholder with the ID
+        return f'<figure data-asset-id="{asset_id}"></figure>\n'
+
+    # Fallback: just return inner content
+    return inner
+
+
+# ── Claude vertaling ──────────────────────────────────────────────────────────
+def translate_post(title_nl, excerpt_nl, body_html_nl, slug_nl, target_langs):
+    """
+    Vertaalt een artikel naar meerdere talen tegelijk via Claude.
+    Geeft een dict terug: {lang_code: {title, excerpt, body_html, slug}}
+    """
+    lang_list = ", ".join(
+        f"{LANGS[l]['label']} ({l})" for l in target_langs
+    )
+
+    prompt = f"""You are a professional translator specializing in music, events, and wedding industry content.
+Translate this Dutch blog post about pianist Thomas Verheul (based in Málaga, Spain) into these languages: {lang_list}.
+
+Return ONLY valid JSON — no markdown, no code fences, no explanation. Use this exact structure:
 {{
-  "slug": "...",
-  "title": "...",
-  "content": "..."
+  "en": {{"title": "...", "excerpt": "...", "body_html": "...", "slug": "..."}},
+  "es": {{"title": "...", "excerpt": "...", "body_html": "...", "slug": "..."}},
+  "de": {{"title": "...", "excerpt": "...", "body_html": "...", "slug": "..."}},
+  "fr": {{"title": "...", "excerpt": "...", "body_html": "...", "slug": "..."}},
+  "ru": {{"title": "...", "excerpt": "...", "body_html": "...", "slug": "..."}}
 }}
 
-INSTRUCTIES PER VELD:
+Only include the languages listed above. Skip languages not in the list.
 
-slug:
-- {c['slug_instruction']}
-- Vertaal de betekenis van de originele slug naar {LANG_NAMES[lang]}
-- Voorbeeld: "pianist-bruiloft-marbella" → ES: "pianista-boda-marbella", FR: "pianiste-mariage-marbella"
-- Max 70 tekens, alleen a-z, 0-9 en koppeltekens
+Translation rules:
+- Preserve all HTML tags exactly: <h2>, <h3>, <p>, <a href="...">, <ul>, <li>, <ol>, <strong>, <em>, <blockquote>, <hr>
+- "slug": URL-friendly version of the translated title (lowercase, hyphens, no special chars, max 60 chars)
+- Keep proper nouns unchanged: Thomas Verheul, Málaga, Marbella, Costa del Sol, Andalucía
+- For Russian: use Cyrillic script
+- Spanish: use Castilian Spanish as spoken in Spain
+- Make translations feel natural and native — not machine-translated
+- Preserve the <a> href URLs exactly as they are
 
-title:
-- Vertaal de blogtitel naar {LANG_NAMES[lang]}
-- Maak hem SEO-sterk en aantrekkelijk
-- {c['prompt']}
+DUTCH TITLE: {title_nl}
+DUTCH EXCERPT: {excerpt_nl}
+DUTCH BODY HTML:
+{body_html_nl}"""
 
-content:
-- {c['prompt']}
-- 850-1100 woorden
-- SEO: gebruik de hoofdzoekterm 4-6x naturlijk
-- Structuur: inleiding (1-2 alinea's), 3-5 <h2>-kopjes elk 2-3 alinea's, afsluitende alinea
-- Sluit af met uitnodiging om contact op te nemen via pianist.es of WhatsApp +34 711 226 882
-- Alleen HTML-body content (<h2>, <p>, <ul>, <strong> etc.) — geen <html>/<head>/<body>
-- Begin direct met <p>
-
-Geef ALLEEN het JSON object terug, zonder uitleg of markdown code blocks."""
-
-    r = requests.post(
+    response = requests.post(
         "https://api.anthropic.com/v1/messages",
-        headers={"x-api-key": CLAUDE_KEY,
-                 "anthropic-version": "2023-06-01",
-                 "content-type": "application/json"},
-        json={"model": "claude-sonnet-4-5", "max_tokens": 2500,
-              "messages": [{"role": "user", "content": prompt}]},
-        timeout=120)
-    r.raise_for_status()
+        headers={
+            "x-api-key": ANTHROPIC_KEY,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+        json={
+            "model": "claude-sonnet-4-20250514",
+            "max_tokens": 6000,
+            "messages": [{"role": "user", "content": prompt}],
+        },
+        timeout=120,
+    )
+    response.raise_for_status()
+    raw = response.json()["content"][0]["text"].strip()
 
-    raw = r.json()["content"][0]["text"].strip()
-
-    # Verwijder eventuele ```json ... ``` wrappers
+    # Strip possible markdown fences
     raw = re.sub(r"^```(?:json)?\s*", "", raw)
     raw = re.sub(r"\s*```$", "", raw)
 
+    return json.loads(raw)
+
+
+# ── Slugify ───────────────────────────────────────────────────────────────────
+def slugify(s):
+    s = s.lower()
+    for a, b in [("á","a"),("é","e"),("í","i"),("ó","o"),("ú","u"),("ü","u"),
+                 ("ñ","n"),("ä","a"),("ö","o"),("ü","u"),("è","e"),("ê","e"),
+                 ("à","a"),("â","a"),("ô","o"),("û","u"),("ç","c")]:
+        s = s.replace(a, b)
+    s = re.sub(r"[^a-z0-9\s-]", "", s)
+    s = re.sub(r"\s+", "-", s).strip("-")
+    s = re.sub(r"-+", "-", s)
+    return s[:60]
+
+
+# ── HTML pagina genereren ─────────────────────────────────────────────────────
+def format_date(iso_date, lang):
+    """Formatteer datum per taal."""
+    months = {
+        "nl": ["jan","feb","mrt","apr","mei","jun","jul","aug","sep","okt","nov","dec"],
+        "en": ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"],
+        "es": ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"],
+        "de": ["Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"],
+        "fr": ["jan","fév","mar","avr","mai","jun","jul","aoû","sep","oct","nov","déc"],
+        "ru": ["янв","фев","мар","апр","май","июн","июл","авг","сен","окт","ноя","дек"],
+    }
     try:
-        data = json.loads(raw)
-        # Valideer en herstel slug als die ongeldig is
-        slug = slugify(data.get("slug", ""))
-        if not slug:
-            slug = slugify(post["slug"])   # fallback naar origineel
-        return {
-            "slug":    slug,
-            "title":   data.get("title", post["title"]).strip(),
-            "content": data.get("content", "").strip(),
-        }
-    except json.JSONDecodeError:
-        # Fallback: probeer slug en titel te extraheren uit tekst
-        print(f"  ⚠️  JSON parse mislukt voor {lang}, gebruik fallback")
-        slug = slugify(post["slug"])
-        return {
-            "slug":    slug,
-            "title":   post["title"],
-            "content": raw,
-        }
-
-# ── URL helpers ───────────────────────────────────────────────────────────────
-def blog_url(lang: str, slug: str) -> str:
-    p = LANG_PREFIXES[lang]
-    return f"{SITE_URL}/{p}/blog/{slug}/" if p else f"{SITE_URL}/blog/{slug}/"
-
-def blog_out_path(lang: str, slug: str) -> Path:
-    p = LANG_PREFIXES[lang]
-    return OUT_DIR / p / "blog" / slug / "index.html" if p \
-           else OUT_DIR / "blog" / slug / "index.html"
-
-# ── Datum formatter ───────────────────────────────────────────────────────────
-def format_date(iso_str: str, lang: str) -> str:
-    try:
-        d = datetime.fromisoformat(iso_str[:10])
-        months = {
-            "nl": ["jan","feb","mrt","apr","mei","jun","jul","aug","sep","okt","nov","dec"],
-            "en": ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"],
-            "es": ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"],
-            "de": ["Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"],
-            "fr": ["jan","fév","mar","avr","mai","jun","jul","aoû","sep","oct","nov","déc"],
-            "ru": ["янв","фев","мар","апр","май","июн","июл","авг","сен","окт","ноя","дек"],
-        }
+        d = datetime.fromisoformat(str(iso_date))
         m = months.get(lang, months["en"])
-        return f"{d.day} {m[d.month-1]} {d.year}"
+        return f"{d.day} {m[d.month - 1]} {d.year}"
     except Exception:
-        return iso_str
+        return str(iso_date)
 
-# ── hreflang tags — verwijzen naar de VERTAALDE slug per taal ────────────────
-def build_hreflang(lang_slugs: dict) -> str:
-    """lang_slugs = {"es": "pianista-boda-marbella", "nl": "pianist-bruiloft-marbella", ...}"""
+
+def build_hreflang(slugs):
+    """Genereer hreflang tags voor alle taalpagina's."""
     lines = []
-    for lang in LANGS:
-        slug = lang_slugs.get(lang, lang_slugs.get("nl", ""))
-        lines.append(f'  <link rel="alternate" hreflang="{lang}" href="{blog_url(lang, slug)}">')
-    # x-default → Spaans
-    es_slug = lang_slugs.get("es", lang_slugs.get("nl", ""))
-    lines.append(f'  <link rel="alternate" hreflang="x-default" href="{blog_url("es", es_slug)}">')
+    for lang, data in LANGS.items():
+        slug = slugs.get(lang, "")
+        if not slug:
+            continue
+        prefix = data["prefix"]
+        url = f"{SITE_URL}/{prefix}/blog/{slug}/" if prefix else f"{SITE_URL}/blog/{slug}/"
+        lines.append(f'  <link rel="alternate" hreflang="{data["html_lang"]}" href="{url}">')
+    lines.append(f'  <link rel="alternate" hreflang="x-default" href="{SITE_URL}/blog/{slugs.get("es", "")}/">')
     return "\n".join(lines)
 
-# ── Taalschakelaar met correcte vertaalde URL per taal ───────────────────────
-def build_lang_switcher(lang_slugs: dict, current_lang: str) -> str:
-    items = []
-    for lang in LANGS:
-        slug   = lang_slugs.get(lang, lang_slugs.get("nl", ""))
-        url    = blog_url(lang, slug)
-        active = ' style="font-weight:700;color:var(--gold-dark);"' if lang == current_lang else ''
-        items.append(f'<a href="{url}"{active}>{LANG_FLAGS[lang]} {LANG_NAMES[lang]}</a>')
-    return " · ".join(items)
 
-# ── HTML pagina builder ───────────────────────────────────────────────────────
-def build_html(post: dict, lang: str, result: dict, lang_slugs: dict) -> str:
-    c            = LANG_COPY[lang]
-    slug         = result["slug"]
-    title        = result["title"]
-    content_html = result["content"]
-    canonical    = blog_url(lang, slug)
-    date_fmt     = format_date(post["date"], lang)
-    hreflang     = build_hreflang(lang_slugs)
-    lang_sw      = build_lang_switcher(lang_slugs, lang)
-    clean        = re.sub(r'<[^>]+>', '', content_html)
-    meta_desc    = clean[:157].rstrip() + "…"
+def build_lang_switcher(slugs, current_lang):
+    """Taalknopjes bovenaan het artikel."""
+    buttons = []
+    for lang, data in LANGS.items():
+        slug = slugs.get(lang, "")
+        if not slug:
+            continue
+        prefix = data["prefix"]
+        url = f"/{prefix}/blog/{slug}/" if prefix else f"/blog/{slug}/"
+        active = ' class="active"' if lang == current_lang else ""
+        buttons.append(
+            f'<a href="{url}"{active}>{data["flag"]} {data["label"]}</a>'
+        )
+    return "\n        ".join(buttons)
 
+
+def generate_html(
+    lang, slug, title, excerpt, body_html, thumbnail_url,
+    category, publish_date, all_slugs, back_url
+):
+    """Genereer een volledige HTML-blogpagina."""
+    data        = LANGS[lang]
+    prefix      = data["prefix"]
+    html_lang   = data["html_lang"]
+    canon_url   = f"{SITE_URL}/{prefix}/blog/{slug}/" if prefix else f"{SITE_URL}/blog/{slug}/"
+    home_url    = f"/{prefix}/" if prefix else "/"
+    blog_url    = f"/{prefix}/blog/" if prefix else "/blog/"
+    date_str    = format_date(publish_date, lang)
+    hreflang    = build_hreflang(all_slugs)
+    lang_switch = build_lang_switcher(all_slugs, lang)
+
+    # Thumbnail HTML
+    if thumbnail_url:
+        thumb_html = f'''  <div class="blog-hero">
+    <img src="{thumbnail_url}" alt="{html_lib.escape(title)}" class="blog-hero-img" loading="eager">
+  </div>'''
+    else:
+        thumb_html = ""
+
+    # Back label per taal
+    back_labels = {
+        "nl": "← Terug naar blog",
+        "en": "← Back to blog",
+        "es": "← Volver al blog",
+        "de": "← Zurück zum Blog",
+        "fr": "← Retour au blog",
+        "ru": "← Назад к блогу",
+    }
+    book_labels = {
+        "nl": "Pianist boeken →",
+        "en": "Book Pianist →",
+        "es": "Reservar Pianista →",
+        "de": "Pianist buchen →",
+        "fr": "Réserver Pianiste →",
+        "ru": "Забронировать →",
+    }
+    back_label = back_labels.get(lang, back_labels["en"])
+    book_label = book_labels.get(lang, book_labels["en"])
+    book_url   = f"{home_url}#offerte"
+
+    # Schema.org Article
     schema = json.dumps({
-        "@context":       "https://schema.org",
-        "@type":          "BlogPosting",
-        "headline":       title,
-        "datePublished":  post["date"][:10],
-        "inLanguage":     lang,
-        "author":         {"@type": "Person", "name": "Thomas Verheul", "url": SITE_URL},
-        "publisher":      {"@type": "Organization", "name": "pianist.es", "url": SITE_URL},
-        "url":            canonical,
-        "description":    meta_desc,
+        "@context": "https://schema.org",
+        "@type": "Article",
+        "headline": title,
+        "description": excerpt,
+        "image": thumbnail_url or "",
+        "datePublished": str(publish_date),
+        "author": {
+            "@type": "Person",
+            "name": "Thomas Verheul",
+            "url": SITE_URL
+        },
+        "publisher": {
+            "@type": "Organization",
+            "name": "Pianist.es",
+            "url": SITE_URL
+        },
+        "url": canon_url,
+        "inLanguage": html_lang,
     }, ensure_ascii=False, indent=2)
 
     return f"""<!DOCTYPE html>
-<html lang="{lang}">
+<html lang="{html_lang}">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{title} | pianist.es</title>
-<meta name="description" content="{meta_desc}">
-<link rel="canonical" href="{canonical}">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{html_lib.escape(title)} | Pianist.es</title>
+  <meta name="description" content="{html_lib.escape(excerpt)}">
+  <meta property="og:title" content="{html_lib.escape(title)}">
+  <meta property="og:description" content="{html_lib.escape(excerpt)}">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="{canon_url}">
+  {f'<meta property="og:image" content="{thumbnail_url}">' if thumbnail_url else ""}
+  <link rel="canonical" href="{canon_url}">
 {hreflang}
-<meta property="og:title" content="{title}">
-<meta property="og:description" content="{meta_desc}">
-<meta property="og:type" content="article">
-<meta property="og:url" content="{canonical}">
-<meta property="og:image" content="{SITE_URL}/assets/thomas-hero.jpg">
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-W87PC5M8NT"></script>
-<script>window.dataLayer=window.dataLayer||[];function gtag(){{dataLayer.push(arguments);}}gtag('js',new Date());gtag('config','G-W87PC5M8NT');</script>
-<script type="application/ld+json">
-{schema}
-</script>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
-<style>
-:root{{--gold:#c9a96e;--gold-dark:#a07840;--cream:#faf8f3;--dark:#1c1a16;--mid:#4a4540;--muted:#8a8070;--border:#e8e0d0;}}
-*{{box-sizing:border-box;margin:0;padding:0;}}
-body{{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--mid);line-height:1.7;}}
-.top-bar{{background:var(--dark);padding:14px 2.5rem;display:flex;align-items:center;justify-content:space-between;gap:1rem;position:sticky;top:0;z-index:100;}}
-.top-bar a.back{{color:var(--gold);text-decoration:none;font-size:13px;font-weight:500;}}
-.top-bar a.back:hover{{color:#fff;}}
-.top-logo{{font-family:'Playfair Display',serif;color:#fff;font-size:17px;font-weight:700;text-decoration:none;}}
-.lang-sw{{font-size:11px;display:flex;flex-wrap:wrap;gap:6px;}}
-.lang-sw a{{color:rgba(255,255,255,.5);text-decoration:none;font-size:12px;transition:color .2s;}}
-.lang-sw a:hover{{color:var(--gold);}}
-article{{max-width:760px;margin:0 auto;padding:4rem 2rem 6rem;}}
-.eyebrow{{font-size:11px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:var(--gold-dark);display:flex;align-items:center;gap:10px;margin-bottom:1rem;}}
-.eyebrow::before{{content:'';width:24px;height:1px;background:var(--gold);}}
-h1{{font-family:'Playfair Display',serif;font-size:clamp(28px,4.5vw,48px);font-weight:900;color:var(--dark);line-height:1.1;letter-spacing:-.02em;margin-bottom:.8rem;}}
-.meta{{font-size:13px;color:var(--muted);margin-bottom:2.5rem;padding-bottom:1.5rem;border-bottom:1px solid var(--border);}}
-.content h2{{font-family:'Playfair Display',serif;font-size:clamp(20px,2.5vw,26px);font-weight:700;color:var(--dark);margin:2.5rem 0 .8rem;}}
-.content h3{{font-family:'Playfair Display',serif;font-size:20px;font-weight:700;color:var(--dark);margin:1.8rem 0 .6rem;}}
-.content p{{margin-bottom:1.25rem;font-size:16px;font-weight:300;}}
-.content strong{{color:var(--dark);font-weight:500;}}
-.content ul{{margin:1rem 0 1.25rem 1.5rem;}}
-.content ul li{{margin-bottom:.5rem;font-size:16px;font-weight:300;}}
-.content a{{color:var(--gold-dark);text-decoration:underline;}}
-.cta{{background:var(--dark);border-radius:16px;padding:2.5rem 2rem;margin-top:3.5rem;text-align:center;}}
-.cta h3{{font-family:'Playfair Display',serif;font-size:22px;color:#fff;margin-bottom:.6rem;}}
-.cta p{{color:#a09585;font-size:14px;margin-bottom:1.5rem;font-weight:300;}}
-.cta-btn{{display:inline-block;background:var(--gold);color:#fff;padding:13px 28px;border-radius:50px;font-size:14px;font-weight:500;text-decoration:none;transition:background .2s;}}
-.cta-btn:hover{{background:var(--gold-dark);}}
-footer{{background:#111;color:#555;text-align:center;padding:2rem;font-size:12px;}}
-footer a{{color:var(--gold);text-decoration:none;}}
-@media(max-width:640px){{article{{padding:2rem 1.2rem 4rem;}}.top-bar{{flex-wrap:wrap;padding:12px 1.2rem;}}.lang-sw{{display:none;}}}}
-</style>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+  <script type="application/ld+json">{schema}</script>
+  <style>
+    :root {{
+      --gold: #c9a96e; --gold-dark: #a07840; --gold-light: #e8d5b0;
+      --cream: #faf8f3; --white: #ffffff; --dark: #1c1a16;
+      --mid: #4a4540; --muted: #8a8070; --border: #e8e0d0;
+    }}
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    html {{ scroll-behavior: smooth; }}
+    body {{
+      font-family: 'DM Sans', sans-serif;
+      background: var(--cream); color: var(--dark);
+      line-height: 1.7;
+    }}
+
+    /* ── NAV ── */
+    .site-nav {{
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(250,248,243,0.95); backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 1rem 2rem;
+      display: flex; align-items: center; justify-content: space-between;
+    }}
+    .site-nav a.logo {{
+      font-family: 'Playfair Display', serif; font-size: 18px;
+      font-weight: 700; color: var(--dark); text-decoration: none;
+    }}
+    .site-nav a.back {{
+      font-size: 13px; font-weight: 500; color: var(--muted);
+      text-decoration: none; letter-spacing: 0.05em;
+      transition: color 0.2s;
+    }}
+    .site-nav a.back:hover {{ color: var(--gold-dark); }}
+
+    /* ── HERO IMAGE ── */
+    .blog-hero {{
+      width: 100%; max-height: 500px; overflow: hidden;
+    }}
+    .blog-hero-img {{
+      width: 100%; height: 500px;
+      object-fit: cover; object-position: center;
+      display: block;
+    }}
+
+    /* ── ARTICLE ── */
+    .article-wrap {{
+      max-width: 780px; margin: 0 auto;
+      padding: 3rem 2rem 5rem;
+    }}
+
+    /* ── LANG SWITCHER ── */
+    .lang-switcher {{
+      display: flex; gap: 8px; flex-wrap: wrap;
+      margin-bottom: 2rem;
+    }}
+    .lang-switcher a {{
+      font-size: 11px; font-weight: 500; letter-spacing: 0.08em;
+      text-transform: uppercase; border: 1px solid var(--border);
+      background: none; color: var(--mid); padding: 5px 12px;
+      border-radius: 20px; text-decoration: none; transition: all 0.2s;
+    }}
+    .lang-switcher a:hover {{ border-color: var(--gold); color: var(--gold-dark); }}
+    .lang-switcher a.active {{
+      background: var(--gold); border-color: var(--gold); color: #fff;
+    }}
+
+    /* ── META ── */
+    .article-meta {{
+      display: flex; align-items: center; gap: 1rem;
+      margin-bottom: 1.2rem;
+    }}
+    .meta-date {{
+      font-size: 12px; font-weight: 500; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--muted);
+    }}
+    .meta-cat {{
+      font-size: 11px; font-weight: 500; letter-spacing: 0.1em;
+      text-transform: uppercase; background: var(--gold-light);
+      color: var(--gold-dark); padding: 3px 10px; border-radius: 20px;
+    }}
+
+    /* ── TITLE ── */
+    h1.article-title {{
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(28px, 5vw, 46px);
+      font-weight: 900; line-height: 1.15;
+      color: var(--dark); margin-bottom: 1.2rem;
+      letter-spacing: -0.02em;
+    }}
+
+    /* ── EXCERPT ── */
+    .article-excerpt {{
+      font-size: 18px; font-weight: 300; color: var(--mid);
+      line-height: 1.75; margin-bottom: 2.5rem;
+      padding-bottom: 2rem; border-bottom: 1px solid var(--border);
+    }}
+
+    /* ── BODY CONTENT ── */
+    .article-body {{
+      font-size: 17px; font-weight: 300; color: var(--mid);
+      line-height: 1.9;
+    }}
+    .article-body h2 {{
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(22px, 3vw, 30px); font-weight: 700;
+      color: var(--dark); margin: 2.5rem 0 1rem;
+      line-height: 1.2;
+    }}
+    .article-body h3 {{
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(18px, 2.5vw, 24px); font-weight: 700;
+      color: var(--dark); margin: 2rem 0 0.8rem;
+    }}
+    .article-body h4, .article-body h5, .article-body h6 {{
+      font-family: 'Playfair Display', serif; font-weight: 700;
+      color: var(--dark); margin: 1.5rem 0 0.6rem;
+    }}
+    .article-body p {{ margin-bottom: 1.4rem; }}
+    .article-body a {{
+      color: var(--gold-dark); text-decoration: underline;
+      text-decoration-color: var(--gold-light);
+      transition: color 0.2s;
+    }}
+    .article-body a:hover {{ color: var(--gold); }}
+    .article-body strong {{ font-weight: 500; color: var(--dark); }}
+    .article-body em {{ font-style: italic; }}
+    .article-body ul, .article-body ol {{
+      padding-left: 1.6rem; margin-bottom: 1.4rem;
+    }}
+    .article-body li {{ margin-bottom: 0.5rem; }}
+    .article-body blockquote {{
+      border-left: 3px solid var(--gold);
+      padding: 0.8rem 1.5rem; margin: 2rem 0;
+      background: var(--white); border-radius: 0 8px 8px 0;
+      font-style: italic; color: var(--mid);
+    }}
+    .article-body hr {{
+      border: none; border-top: 1px solid var(--border);
+      margin: 2.5rem 0;
+    }}
+    .article-body code {{
+      font-family: monospace; background: var(--cream);
+      padding: 2px 6px; border-radius: 4px; font-size: 14px;
+    }}
+
+    /* ── CTA ── */
+    .article-cta {{
+      margin-top: 3.5rem; padding: 2.5rem;
+      background: var(--dark); border-radius: 16px;
+      text-align: center;
+    }}
+    .article-cta p {{
+      font-size: 15px; font-weight: 300; color: #c0b8a8;
+      margin-bottom: 1.5rem; line-height: 1.7;
+    }}
+    .article-cta a {{
+      display: inline-flex; align-items: center; gap: 8px;
+      background: var(--gold); color: #fff;
+      padding: 14px 32px; border-radius: 50px;
+      font-size: 15px; font-weight: 500;
+      text-decoration: none; transition: all 0.25s;
+      letter-spacing: 0.03em;
+    }}
+    .article-cta a:hover {{
+      background: var(--gold-dark); transform: translateY(-2px);
+    }}
+
+    /* ── FOOTER ── */
+    .site-footer {{
+      background: var(--dark); color: #a09585;
+      text-align: center; padding: 2rem;
+      font-size: 13px;
+    }}
+    .site-footer a {{
+      color: var(--gold); text-decoration: none;
+    }}
+
+    @media (max-width: 640px) {{
+      .article-wrap {{ padding: 2rem 1.2rem 4rem; }}
+      .blog-hero-img {{ height: 250px; }}
+      .site-nav {{ padding: 0.8rem 1.2rem; }}
+    }}
+  </style>
 </head>
 <body>
-<div class="top-bar">
-  <a href="{c['cta_url']}" class="back">{c['back']}</a>
-  <a href="{SITE_URL}" class="top-logo">pianist.es</a>
-  <div class="lang-sw">{lang_sw}</div>
-</div>
-<article>
-  <div class="eyebrow">{post['category']}</div>
-  <h1>{title}</h1>
-  <div class="meta">{c['by']} · {date_fmt}</div>
-  <div class="content">{content_html}</div>
-  <div class="cta">
-    <h3>{c['cta_h']}</h3>
-    <p>{c['cta_p']}</p>
-    <a href="{SITE_URL}{c['cta_url']}#offerte" class="cta-btn">{c['cta_btn']}</a>
-  </div>
-</article>
-<footer><p>© 2025 <a href="{SITE_URL}">pianist.es</a> · Thomas Verheul · Málaga, España</p></footer>
+
+  <nav class="site-nav">
+    <a href="{home_url}" class="logo">Pianist.es</a>
+    <a href="{blog_url}" class="back">{back_label}</a>
+  </nav>
+
+{thumb_html}
+
+  <article class="article-wrap">
+
+    <div class="lang-switcher">
+      {lang_switch}
+    </div>
+
+    <div class="article-meta">
+      <span class="meta-date">{date_str}</span>
+      {f'<span class="meta-cat">{html_lib.escape(category)}</span>' if category else ""}
+    </div>
+
+    <h1 class="article-title">{html_lib.escape(title)}</h1>
+
+    <p class="article-excerpt">{html_lib.escape(excerpt)}</p>
+
+    <div class="article-body">
+      {body_html}
+    </div>
+
+    <div class="article-cta">
+      <p>Thomas Verheul — professioneel pianist voor bruiloften, diners en evenementen in Málaga, Marbella en heel Spanje.</p>
+      <a href="{book_url}">{book_label}</a>
+    </div>
+
+  </article>
+
+  <footer class="site-footer">
+    <p>© 2025 <a href="{home_url}">Pianist.es</a> · Thomas Verheul · Málaga, España</p>
+  </footer>
+
 </body>
-</html>"""
+</html>
+"""
 
-# ── Blog-index bijwerken (JSON bestand dat de site gebruikt) ──────────────────
-def update_blog_index(post: dict, results: dict, lang_slugs: dict):
-    index_path = OUT_DIR / "blog-index.json"
-    try:
-        index = json.loads(index_path.read_text()) if index_path.exists() else []
-    except Exception:
-        index = []
 
-    entry = {
-        "source_slug": post["slug"],
-        "date":        post["date"][:10],
-        "category":    post["category"],
-        "slugs":       lang_slugs,
-        "titles":      {lang: results[lang]["title"] for lang in LANGS},
-        "urls":        {lang: blog_url(lang, lang_slugs[lang]) for lang in LANGS},
-    }
-    existing = next((i for i, e in enumerate(index)
-                     if e.get("source_slug") == post["slug"]), None)
-    if existing is not None:
-        index[existing] = entry
-    else:
-        index.insert(0, entry)
+# ── Blog index bijwerken ──────────────────────────────────────────────────────
+def update_blog_index(entry):
+    """Voeg een nieuwe post toe aan blog-index.json (of update bestaande)."""
+    index = []
+    if BLOG_INDEX.exists():
+        index = json.loads(BLOG_INDEX.read_text(encoding="utf-8"))
 
-    index_path.write_text(json.dumps(index, ensure_ascii=False, indent=2))
+    # Verwijder bestaande entry met dezelfde source_slug
+    index = [e for e in index if e.get("source_slug") != entry["source_slug"]]
+    index.append(entry)
+
+    # Sorteer op datum (nieuwste eerst)
+    index.sort(key=lambda e: e.get("date", ""), reverse=True)
+
+    BLOG_INDEX.write_text(
+        json.dumps(index, ensure_ascii=False, indent=2),
+        encoding="utf-8"
+    )
     print(f"  ✅ blog-index.json bijgewerkt ({len(index)} posts)")
 
-# ── Contentful: markeer als gepubliceerd ──────────────────────────────────────
-def mark_published(entry_id: str):
-    if not CF_MGMT:
-        return
-    r = requests.get(
-        f"https://api.contentful.com/spaces/{CF_SPACE}/environments/master/entries/{entry_id}",
-        headers={"Authorization": f"Bearer {CF_MGMT}"})
-    if not r.ok:
-        return
-    version = r.json()["sys"]["version"]
-    requests.patch(
-        f"https://api.contentful.com/spaces/{CF_SPACE}/environments/master/entries/{entry_id}",
-        headers={
-            "Authorization":    f"Bearer {CF_MGMT}",
-            "Content-Type":     "application/vnd.contentful.management.v1+json",
-            "X-Contentful-Version": str(version),
-        },
-        json={"fields": {"status": {"nl": "published", "en": "published"}}},
-    )
-    print(f"  ✅ Contentful entry {entry_id} → published")
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# ── Hoofdfunctie ──────────────────────────────────────────────────────────────
 def main():
-    print("🎹 Meertalige Blog Generator (met vertaalde slugs) — pianist.es\n")
+    print("🎹 pianist.es Blog Generator")
+    print("════════════════════════════")
 
-    post = get_next_post()
-    print(f"📝 '{post['title']}' (bron-slug: {post['slug']})\n")
-    print("🤖 Claude schrijft blog + slug + titel in 6 talen...\n")
+    # Haal posts op uit Contentful
+    data = fetch_contentful()
+    items = data.get("items", [])
 
-    results    = {}   # lang → {"slug", "title", "content"}
-    lang_slugs = {}   # lang → slug
+    if not items:
+        print("ℹ️  Geen gepubliceerde Nederlandse blogposts gevonden in Contentful.")
+        return
 
-    for lang in LANGS:
-        print(f"  [{lang.upper()}]", end=" ", flush=True)
-        result = write_blog_in_lang(post, lang)
-        results[lang]    = result
-        lang_slugs[lang] = result["slug"]
-        print(f"slug: {result['slug'][:45]}  |  titel: {result['title'][:45]}...")
+    # Laad bestaande blog-index om te checken welke al verwerkt zijn
+    existing_slugs = set()
+    if BLOG_INDEX.exists():
+        for entry in json.loads(BLOG_INDEX.read_text(encoding="utf-8")):
+            existing_slugs.add(entry.get("source_slug", ""))
 
-    print()
-    print("📄 HTML-pagina's aanmaken...\n")
+    processed = 0
 
-    for lang in LANGS:
-        out = blog_out_path(lang, lang_slugs[lang])
-        out.parent.mkdir(parents=True, exist_ok=True)
-        html = build_html(post, lang, results[lang], lang_slugs)
-        out.write_text(html, encoding="utf-8")
-        url = blog_url(lang, lang_slugs[lang])
-        print(f"  {LANG_FLAGS[lang]}  {url}")
+    for item in items:
+        fields = item.get("fields", {})
 
-    print()
-    update_blog_index(post, results, lang_slugs)
-    mark_published(post["id"])
+        title_nl      = fields.get("title", "").strip()
+        slug_nl       = fields.get("slug", "").strip() or slugify(title_nl)
+        excerpt_nl    = fields.get("excerpt", "").strip()
+        category      = fields.get("category", "").strip()
+        publish_date  = fields.get("publishDate", date.today().isoformat())
+        body_field    = fields.get("body") or fields.get("content")  # beide veldnamen ondersteunen
 
-    # Sla NL titel op voor git commit bericht
-    nl_title = results.get("nl", {}).get("title") or results.get("en", {}).get("title") or post["title"]
-    Path("/tmp/new_post_title.txt").write_text(nl_title)
+        # FORCE_SLUG: verwerk alleen deze slug (voor handmatige re-run)
+        if FORCE_SLUG and slug_nl != FORCE_SLUG:
+            continue
 
-    print(f"\n🎉 Klaar! 6 pagina's aangemaakt met taalspecifieke URLs.")
-    print("\nURL-overzicht:")
-    for lang in LANGS:
-        print(f"  {LANG_FLAGS[lang]}  {blog_url(lang, lang_slugs[lang])}")
+        # Sla over als al verwerkt (tenzij force)
+        if slug_nl in existing_slugs and not FORCE_SLUG:
+            print(f"  ⏭️  '{slug_nl}' al verwerkt — overgeslagen")
+            continue
+
+        if not title_nl:
+            print(f"  ⚠️  Post zonder titel overgeslagen")
+            continue
+
+        print(f"\n📝 Verwerken: '{title_nl}'")
+        print(f"   Slug: {slug_nl}")
+
+        # ── Thumbnail ophalen ──────────────────────────────────────────────────
+        thumbnail_url = ""
+        thumb_field = fields.get("thumbnail")
+        if thumb_field:
+            asset_id = thumb_field.get("sys", {}).get("id", "")
+            if asset_id:
+                thumbnail_url = get_asset_url(data, asset_id)
+                if thumbnail_url:
+                    print(f"   Thumbnail: {thumbnail_url}")
+                else:
+                    print(f"   ⚠️  Thumbnail asset niet gevonden in includes")
+
+        # ── Rich text → HTML ───────────────────────────────────────────────────
+        if isinstance(body_field, dict) and body_field.get("nodeType") == "document":
+            body_html_nl = rich_text_to_html(body_field)
+        elif isinstance(body_field, str):
+            # Fallback: plain tekst in <p> tags
+            body_html_nl = "\n".join(
+                f"<p>{html_lib.escape(p.strip())}</p>"
+                for p in body_field.split("\n\n") if p.strip()
+            )
+        else:
+            body_html_nl = f"<p>{html_lib.escape(excerpt_nl)}</p>"
+
+        # ── Vertalen naar 5 talen ──────────────────────────────────────────────
+        target_langs = [l for l in LANGS if l != "nl"]
+        print(f"   🌍 Vertalen naar: {', '.join(target_langs)}...")
+
+        try:
+            translations = translate_post(
+                title_nl, excerpt_nl, body_html_nl, slug_nl, target_langs
+            )
+            print(f"   ✅ Vertaling gelukt")
+        except Exception as e:
+            print(f"   ❌ Vertaling mislukt: {e}")
+            print(f"   ℹ️  Post wordt alleen in het Nederlands gepubliceerd")
+            translations = {}
+
+        # Voeg Nederlandse versie toe
+        all_versions = {
+            "nl": {
+                "title": title_nl,
+                "excerpt": excerpt_nl,
+                "body_html": body_html_nl,
+                "slug": slug_nl,
+            }
+        }
+        for lang, t in translations.items():
+            if lang in LANGS:
+                all_versions[lang] = t
+
+        # Bouw slugs-dict voor hreflang en lang-switcher
+        all_slugs = {lang: v.get("slug", slug_nl) for lang, v in all_versions.items()}
+
+        # ── HTML pagina's schrijven ────────────────────────────────────────────
+        index_entry = {
+            "source_slug": slug_nl,
+            "date": str(publish_date),
+            "category": category,
+            "thumbnail": thumbnail_url,
+            "slugs": {},
+            "titles": {},
+            "excerpts": {},
+            "urls": {},
+        }
+
+        for lang, version in all_versions.items():
+            lang_data = LANGS[lang]
+            prefix    = lang_data["prefix"]
+            v_slug    = version.get("slug", slug_nl)
+            v_title   = version.get("title", title_nl)
+            v_excerpt = version.get("excerpt", excerpt_nl)
+            v_body    = version.get("body_html", body_html_nl)
+
+            # Bepaal uitvoerpad
+            if prefix:
+                out_dir = Path(prefix) / "blog" / v_slug
+            else:
+                out_dir = Path("blog") / v_slug
+            out_dir.mkdir(parents=True, exist_ok=True)
+
+            back_url = f"/{prefix}/" if prefix else "/"
+
+            html_content = generate_html(
+                lang=lang,
+                slug=v_slug,
+                title=v_title,
+                excerpt=v_excerpt,
+                body_html=v_body,
+                thumbnail_url=thumbnail_url,
+                category=category,
+                publish_date=publish_date,
+                all_slugs=all_slugs,
+                back_url=back_url,
+            )
+
+            out_file = out_dir / "index.html"
+            out_file.write_text(html_content, encoding="utf-8")
+
+            url = f"{SITE_URL}/{prefix}/blog/{v_slug}/" if prefix else f"{SITE_URL}/blog/{v_slug}/"
+            print(f"   ✅ {lang.upper()}: {out_file} → {url}")
+
+            index_entry["slugs"][lang]   = v_slug
+            index_entry["titles"][lang]  = v_title
+            index_entry["excerpts"][lang] = v_excerpt
+            index_entry["urls"][lang]    = url
+
+        # ── Blog index bijwerken ───────────────────────────────────────────────
+        update_blog_index(index_entry)
+
+        # Sla post-titel op voor de git commit message
+        Path("/tmp/new_post_title.txt").write_text(title_nl, encoding="utf-8")
+
+        processed += 1
+
+        # Kleine pauze tussen posts (rate limiting)
+        if processed < len(items):
+            time.sleep(1)
+
+    if processed == 0:
+        print("\nℹ️  Geen nieuwe posts om te verwerken.")
+    else:
+        print(f"\n🎉 Klaar! {processed} post(s) verwerkt in {len(all_versions)} talen.")
+
 
 if __name__ == "__main__":
     main()
