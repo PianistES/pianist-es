@@ -147,64 +147,64 @@ def rich_text_to_html(node):
 
 # ── Claude vertaling ──────────────────────────────────────────────────────────
 def translate_post(title_nl, excerpt_nl, body_html_nl, slug_nl, target_langs):
-    """
-    Vertaalt een artikel naar meerdere talen tegelijk via Claude.
-    Geeft een dict terug: {lang_code: {title, excerpt, body_html, slug}}
-    """
-    lang_list = ", ".join(
-        f"{LANGS[l]['label']} ({l})" for l in target_langs
-    )
+    translations = {}
+    
+    for lang in target_langs:
+        lang_names = {
+            "es": "Spanish (Castilian, as spoken in Spain)",
+            "en": "English",
+            "de": "German",
+            "fr": "French",
+            "ru": "Russian (Cyrillic script)"
+        }
+        lang_name = lang_names.get(lang, lang)
+        
+        prompt = f"""You are a professional translator specializing in music, events, and wedding industry content.
+Translate this Dutch blog post about pianist Thomas Verheul (based in Málaga, Spain) into {lang_name}.
 
-    prompt = f"""You are a professional translator specializing in music, events, and wedding industry content.
-Translate this Dutch blog post about pianist Thomas Verheul (based in Málaga, Spain) into these languages: {lang_list}.
-
-Return ONLY valid JSON — no markdown, no code fences, no explanation. Use this exact structure:
+Return ONLY valid JSON — no markdown, no code fences, no explanation:
 {{
-  "en": {{"title": "...", "excerpt": "...", "body_html": "...", "slug": "..."}},
-  "es": {{"title": "...", "excerpt": "...", "body_html": "...", "slug": "..."}},
-  "de": {{"title": "...", "excerpt": "...", "body_html": "...", "slug": "..."}},
-  "fr": {{"title": "...", "excerpt": "...", "body_html": "...", "slug": "..."}},
-  "ru": {{"title": "...", "excerpt": "...", "body_html": "...", "slug": "..."}}
+  "{lang}": {{"title": "...", "excerpt": "...", "body_html": "...", "slug": "..."}}
 }}
 
-Only include the languages listed above. Skip languages not in the list.
-
-Translation rules:
+Rules:
 - Preserve all HTML tags exactly: <h2>, <h3>, <p>, <a href="...">, <ul>, <li>, <ol>, <strong>, <em>, <blockquote>, <hr>
 - "slug": URL-friendly version of the translated title (lowercase, hyphens, no special chars, max 60 chars)
 - Keep proper nouns unchanged: Thomas Verheul, Málaga, Marbella, Costa del Sol, Andalucía
-- For Russian: use Cyrillic script
-- Spanish: use Castilian Spanish as spoken in Spain
-- Make translations feel natural and native — not machine-translated
-- Preserve the <a> href URLs exactly as they are
+- Make the translation feel natural and native
 
 DUTCH TITLE: {title_nl}
 DUTCH EXCERPT: {excerpt_nl}
 DUTCH BODY HTML:
 {body_html_nl}"""
 
-    response = requests.post(
-        "https://api.anthropic.com/v1/messages",
-        headers={
-            "x-api-key": ANTHROPIC_KEY,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
-        json={
-            "model": ANTHROPIC_MODEL,
-            "max_tokens": 6000,
-            "messages": [{"role": "user", "content": prompt}],
-        },
-        timeout=120,
-    )
-    response.raise_for_status()
-    raw = response.json()["content"][0]["text"].strip()
-
-    # Strip possible markdown fences
-    raw = re.sub(r"^```(?:json)?\s*", "", raw)
-    raw = re.sub(r"\s*```$", "", raw)
-
-    return json.loads(raw)
+        try:
+            response = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": ANTHROPIC_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": ANTHROPIC_MODEL,
+                    "max_tokens": 16000,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+                timeout=120,
+            )
+            response.raise_for_status()
+            raw = response.json()["content"][0]["text"].strip()
+            raw = re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw)
+            parsed = json.loads(raw)
+            translations[lang] = parsed[lang]
+            print(f"   ✅ {lang.upper()} vertaald")
+        except Exception as e:
+            print(f"   ⚠️  {lang.upper()} vertaling mislukt: {e}")
+            continue
+    
+    return translations
 
 
 # ── Slugify ───────────────────────────────────────────────────────────────────
