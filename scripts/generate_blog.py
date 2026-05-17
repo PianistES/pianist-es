@@ -680,7 +680,7 @@ def main():
                 title_nl, excerpt_nl, body_html_nl, slug_nl, target_langs
             )
             print(f"   ✅ Vertaling gelukt")
-except Exception as e:
+        except Exception as e:
             print(f"   ❌ Vertaling mislukt: {type(e).__name__}: {e}")
             if hasattr(e, 'response') and e.response is not None:
                 print(f"   ❌ Response status: {e.response.status_code}")
