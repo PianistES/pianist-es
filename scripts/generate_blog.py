@@ -714,6 +714,7 @@ def main():
             "slugs": {},
             "titles": {},
             "excerpts": {},
+            "contents": {},
             "urls": {},
         }
 
@@ -753,10 +754,11 @@ def main():
             url = f"{SITE_URL}/{prefix}/blog/{v_slug}/" if prefix else f"{SITE_URL}/blog/{v_slug}/"
             print(f"   ✅ {lang.upper()}: {out_file} → {url}")
 
-            index_entry["slugs"][lang]   = v_slug
-            index_entry["titles"][lang]  = v_title
+            index_entry["slugs"][lang]    = v_slug
+            index_entry["titles"][lang]   = v_title
             index_entry["excerpts"][lang] = v_excerpt
-            index_entry["urls"][lang]    = url
+            index_entry["contents"][lang] = v_body
+            index_entry["urls"][lang]     = url
 
         # ── Blog index bijwerken ───────────────────────────────────────────────
         update_blog_index(index_entry)
