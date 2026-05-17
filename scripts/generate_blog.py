@@ -681,7 +681,10 @@ def main():
             )
             print(f"   ✅ Vertaling gelukt")
         except Exception as e:
-            print(f"   ❌ Vertaling mislukt: {e}")
+        print(f"   ❌ Vertaling mislukt: {type(e).__name__}: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            print(f"   ❌ Response status: {e.response.status_code}")
+            print(f"   ❌ Response body: {e.response.text}")
             print(f"   ℹ️  Post wordt alleen in het Nederlands gepubliceerd")
             translations = {}
 
