@@ -72,6 +72,13 @@
 <link rel="alternate" hreflang="fr" href="https://pianist.es/fr/">
 <link rel="alternate" hreflang="ru" href="https://pianist.es/ru/">
 <link rel="alternate" hreflang="x-default" href="https://pianist.es/">
+<link rel="alternate" hreflang="es" href="https://pianist.es/">
+<link rel="alternate" hreflang="en" href="https://pianist.es/en/">
+<link rel="alternate" hreflang="nl" href="https://pianist.es/nl/">
+<link rel="alternate" hreflang="de" href="https://pianist.es/de/">
+<link rel="alternate" hreflang="fr" href="https://pianist.es/fr/">
+<link rel="alternate" hreflang="ru" href="https://pianist.es/ru/">
+<link rel="alternate" hreflang="x-default" href="https://pianist.es/">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,700;0,900;1,400;1,700&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
@@ -2464,63 +2471,114 @@ window.addEventListener('popstate', () => {
 });
 
 // ─── Laad blogs uit Contentful (content type: blogPost) ───
+
 async function loadBlogPosts(spaceId, accessToken) {
-  const grid = document.getElementById('blogGrid');
-  const postsPerLoad = 12; // max ophalen
-
   try {
-    const url = `https://cdn.contentful.com/spaces/${spaceId}/entries?access_token=${accessToken}&content_type=blogPost&order=-fields.publishDate&limit=${postsPerLoad}&include=2`;
-    const r = await fetch(url);
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const data = await r.json();
+    // Laad eerst blog-index.json (bevat vertalingen van generate_blog.py)
+    const r = await fetch('/blog-index.json?v=' + Date.now());
+    if (!r.ok) throw new Error('blog-index.json niet gevonden');
+    const index = await r.json();
 
-    const items = (data.items || []);
-    if (items.length === 0) {
-      useFallbackBlogPosts();
-      return;
-    }
+    if (!index || index.length === 0) throw new Error('Leeg');
 
-    // Zet om naar intern formaat
-    const assets = (data.includes && data.includes.Asset) || [];
-    allBlogPosts = items.map(item => {
-      const f = item.fields;
-      // Haal featured image op
-      let imageUrl = null;
-      if (f.featuredImage && f.featuredImage.sys) {
-        const asset = assets.find(a => a.sys.id === f.featuredImage.sys.id);
-        if (asset && asset.fields && asset.fields.file) {
-          const rawUrl = asset.fields.file.url;
-          imageUrl = rawUrl.startsWith('//') ? 'https:' + rawUrl : rawUrl;
-        }
-      }
-
-      // Contentful kan titels/content als string opslaan of als gelokaliseerde object
-      // We hanteren beide gevallen
-      const getField = (fieldVal) => {
-        if (!fieldVal) return null;
-        if (typeof fieldVal === 'string') return fieldVal;
-        if (typeof fieldVal === 'object') return fieldVal;
-        return String(fieldVal);
-      };
-
-      return {
-        slug:     f.slug || item.sys.id,
-        date:     f.publishDate || item.sys.createdAt || '',
-        image:    imageUrl,
-        category: getField(f.category) || { nl:'Blog', en:'Blog' },
-        title:    getField(f.title)    || 'Blog post',
-        excerpt:  getField(f.excerpt)  || getField(f.summary) || '',
-        content:  getField(f.content)  || getField(f.body)    || ''
-      };
-    });
+    allBlogPosts = index.map(entry => ({
+      slug:     entry.source_slug || '',
+      date:     entry.date        || '',
+      image:    entry.thumbnail   || null,
+      category: entry.category    || 'Blog',
+      title:    entry.titles      || entry.title   || '',
+      excerpt:  entry.excerpts    || entry.excerpt  || '',
+      content:  entry.content     || '',
+      slugs:    entry.slugs       || {},
+      urls:     entry.urls        || {},
+    }));
 
     displayedPostCount = POSTS_PER_PAGE;
     renderBlogGrid();
-    console.log(`✅ ${allBlogPosts.length} blogposts geladen uit Contentful`);
+    console.log(`✅ ${allBlogPosts.length} posts geladen uit blog-index.json`);
 
-  } catch(err) {
-    console.warn('Blog laden uit Contentful mislukt:', err.message, '— Fallback posts worden gebruikt.');
-    useFallbackBlogPosts();
+  } catch (err) {
+    console.warn('blog-index.json laden mislukt:', err.message, '— fallback naar Contentful');
+
+    try {
+      const url = `https://cdn.contentful.com/spaces/${spaceId}/entries`
+        + `?access_token=${accessToken}`
+        + `&content_type=blogPost`
+        + `&order=-fields.publishDate`
+        + `&limit=50`
+        + `&include=2`;
+      const r2 = await fetch(url);
+      if (!r2.ok) throw new Error(`HTTP ${r2.status}`);
+      const data = await r2.json();
+      const items  = data.items || [];
+      const assets = (data.includes && data.includes.Asset) || [];
+
+      if (items.length === 0) { useFallbackBlogPosts(); return; }
+
+      function richTextToHtml(node) {
+        if (!node) return '';
+        if (node.nodeType === 'text') {
+          let t = (node.value || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+          (node.marks || []).forEach(m => {
+            if (m.type === 'bold')      t = `<strong>${t}</strong>`;
+            if (m.type === 'italic')    t = `<em>${t}</em>`;
+            if (m.type === 'underline') t = `<u>${t}</u>`;
+            if (m.type === 'code')      t = `<code>${t}</code>`;
+          });
+          return t;
+        }
+        const inner = (node.content || []).map(richTextToHtml).join('');
+        switch (node.nodeType) {
+          case 'document':       return inner;
+          case 'paragraph':      return inner.trim() ? `<p>${inner}</p>` : '';
+          case 'heading-2':      return `<h2>${inner}</h2>`;
+          case 'heading-3':      return `<h3>${inner}</h3>`;
+          case 'heading-4':      return `<h4>${inner}</h4>`;
+          case 'unordered-list': return `<ul>${inner}</ul>`;
+          case 'ordered-list':   return `<ol>${inner}</ol>`;
+          case 'list-item':      return `<li>${inner}</li>`;
+          case 'blockquote':     return `<blockquote>${inner}</blockquote>`;
+          case 'hr':             return `<hr>`;
+          case 'hyperlink':      return `<a href="${(node.data||{}).uri||'#'}" target="_blank" rel="noopener">${inner}</a>`;
+          default:               return inner;
+        }
+      }
+
+      allBlogPosts = items.map(item => {
+        const f = item.fields;
+        let imageUrl = null;
+        if (f.thumbnail && f.thumbnail.sys) {
+          const asset = assets.find(a => a.sys.id === f.thumbnail.sys.id);
+          if (asset && asset.fields && asset.fields.file) {
+            const rawUrl = asset.fields.file.url;
+            imageUrl = rawUrl.startsWith('//') ? 'https:' + rawUrl : rawUrl;
+          }
+        }
+        const bodyField = f.body || f.content;
+        let bodyHtml = '';
+        if (bodyField && typeof bodyField === 'object' && bodyField.nodeType === 'document') {
+          bodyHtml = richTextToHtml(bodyField);
+        } else if (typeof bodyField === 'string') {
+          bodyHtml = bodyField;
+        } else {
+          bodyHtml = `<p>${f.excerpt || ''}</p>`;
+        }
+        return {
+          slug:     f.slug || item.sys.id,
+          date:     f.publishDate || item.sys.createdAt || '',
+          image:    imageUrl,
+          category: f.category || 'Blog',
+          title:    f.title    || '',
+          excerpt:  f.excerpt  || '',
+          content:  bodyHtml
+        };
+      });
+
+      displayedPostCount = POSTS_PER_PAGE;
+      renderBlogGrid();
+    } catch(err2) {
+      useFallbackBlogPosts();
+    }
   }
 }
 
