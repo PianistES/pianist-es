@@ -2530,7 +2530,7 @@ async function loadBlogPosts(spaceId, accessToken) {
       category: entry.category    || 'Blog',
       title:    entry.titles      || entry.title   || '',
       excerpt:  entry.excerpts    || entry.excerpt  || '',
-      content:  entry.content     || '',
+      content:  entry.contents    || entry.content || '',
       slugs:    entry.slugs       || {},
       urls:     entry.urls        || {},
     }));
