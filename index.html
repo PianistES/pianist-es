@@ -2482,37 +2482,70 @@ async function loadBlogPosts(spaceId, accessToken) {
 
     // Zet om naar intern formaat
     const assets = (data.includes && data.includes.Asset) || [];
-    allBlogPosts = items.map(item => {
-      const f = item.fields;
-      // Haal featured image op
-      let imageUrl = null;
-      if (f.featuredImage && f.featuredImage.sys) {
-        const asset = assets.find(a => a.sys.id === f.featuredImage.sys.id);
-        if (asset && asset.fields && asset.fields.file) {
-          const rawUrl = asset.fields.file.url;
-          imageUrl = rawUrl.startsWith('//') ? 'https:' + rawUrl : rawUrl;
-        }
-      }
+allBlogPosts = items.map(item => {
+  const f = item.fields;
 
-      // Contentful kan titels/content als string opslaan of als gelokaliseerde object
-      // We hanteren beide gevallen
-      const getField = (fieldVal) => {
-        if (!fieldVal) return null;
-        if (typeof fieldVal === 'string') return fieldVal;
-        if (typeof fieldVal === 'object') return fieldVal;
-        return String(fieldVal);
-      };
+  // Thumbnail ophalen (veld heet 'thumbnail')
+  let imageUrl = null;
+  if (f.thumbnail && f.thumbnail.sys) {
+    const asset = assets.find(a => a.sys.id === f.thumbnail.sys.id);
+    if (asset && asset.fields && asset.fields.file) {
+      const rawUrl = asset.fields.file.url;
+      imageUrl = rawUrl.startsWith('//') ? 'https:' + rawUrl : rawUrl;
+    }
+  }
 
-      return {
-        slug:     f.slug || item.sys.id,
-        date:     f.publishDate || item.sys.createdAt || '',
-        image:    imageUrl,
-        category: getField(f.category) || { nl:'Blog', en:'Blog' },
-        title:    getField(f.title)    || 'Blog post',
-        excerpt:  getField(f.excerpt)  || getField(f.summary) || '',
-        content:  getField(f.content)  || getField(f.body)    || ''
-      };
-    });
+  // Rich Text naar HTML omzetten
+  function richTextToHtml(node) {
+    if (!node) return '';
+    if (node.nodeType === 'text') {
+      let t = (node.value || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      (node.marks || []).forEach(m => {
+        if (m.type === 'bold')      t = `<strong>${t}</strong>`;
+        if (m.type === 'italic')    t = `<em>${t}</em>`;
+        if (m.type === 'underline') t = `<u>${t}</u>`;
+        if (m.type === 'code')      t = `<code>${t}</code>`;
+      });
+      return t;
+    }
+    const inner = (node.content || []).map(richTextToHtml).join('');
+    switch (node.nodeType) {
+      case 'document':       return inner;
+      case 'paragraph':      return inner.trim() ? `<p>${inner}</p>` : '';
+      case 'heading-2':      return `<h2>${inner}</h2>`;
+      case 'heading-3':      return `<h3>${inner}</h3>`;
+      case 'heading-4':      return `<h4>${inner}</h4>`;
+      case 'unordered-list': return `<ul>${inner}</ul>`;
+      case 'ordered-list':   return `<ol>${inner}</ol>`;
+      case 'list-item':      return `<li>${inner}</li>`;
+      case 'blockquote':     return `<blockquote>${inner}</blockquote>`;
+      case 'hr':             return `<hr>`;
+      case 'hyperlink':      return `<a href="${(node.data||{}).uri||'#'}" target="_blank" rel="noopener">${inner}</a>`;
+      default:               return inner;
+    }
+  }
+
+  // Body verwerken
+  const bodyField = f.body || f.content;
+  let bodyHtml = '';
+  if (bodyField && typeof bodyField === 'object' && bodyField.nodeType === 'document') {
+    bodyHtml = richTextToHtml(bodyField);
+  } else if (typeof bodyField === 'string') {
+    bodyHtml = bodyField;
+  } else {
+    bodyHtml = `<p>${f.excerpt || ''}</p>`;
+  }
+
+  return {
+    slug:     f.slug || item.sys.id,
+    date:     f.publishDate || item.sys.createdAt || '',
+    image:    imageUrl,
+    category: f.category || 'Blog',
+    title:    f.title    || '',
+    excerpt:  f.excerpt  || '',
+    content:  bodyHtml
+  };
+});
 
     displayedPostCount = POSTS_PER_PAGE;
     renderBlogGrid();
