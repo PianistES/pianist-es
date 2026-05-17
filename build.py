@@ -105,7 +105,7 @@ def build_schema(lang_code, canonical):
 {{
   "@context": "https://schema.org",
   "@type": "LocalBusiness",
-  "name": "Thomas Verheul – Pianist.es",
+  "name": "Pianist.es - Pianist booking in Malaga, Marbella & Spain",
   "description": "{desc}",
   "url": "{canonical}",
   "telephone": "+34711226882",
