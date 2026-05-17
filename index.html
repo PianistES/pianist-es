@@ -3083,7 +3083,26 @@ window.addEventListener('DOMContentLoaded', () => {
     };
   }
 });
-
+// ─── Initialiseer piano opties en placeholder bij laden ───
+document.addEventListener('DOMContentLoaded', () => {
+  const sel = document.getElementById('pianoSelect');
+  if (sel) {
+    Array.from(sel.options).forEach(opt => {
+      const translation = opt.getAttribute('data-' + currentLang) || opt.getAttribute('data-nl');
+      if (translation) opt.text = translation;
+    });
+  }
+  const placeholders = {
+    nl: 'Muziekstijl, verzoeknummers, sfeer van het evenement...',
+    en: 'Music style, song requests, atmosphere of the event...',
+    es: 'Estilo musical, canciones solicitadas, ambiente del evento...',
+    de: 'Musikstil, Musikwünsche, Atmosphäre der Veranstaltung...',
+    fr: 'Style musical, chansons demandées, ambiance de l\'événement...',
+    ru: 'Стиль музыки, заявки на песни, атмосфера мероприятия...'
+  };
+  const ta = document.getElementById('f_wensen');
+  if (ta && placeholders[currentLang]) ta.placeholder = placeholders[currentLang];
+});
 // ─── Check localStorage on load (dev mode) ───
 window.addEventListener('DOMContentLoaded', () => {
   const savedSpace = localStorage.getItem('cf_space');
