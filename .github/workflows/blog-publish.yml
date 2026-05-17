@@ -29,6 +29,7 @@ jobs:
       - name: Test Anthropic API
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL:         claude-sonnet-4-5-20251022
         run: |
           STATUS=$(curl -s -o /tmp/api_response.txt -w "%{http_code}" \
             -X POST https://api.anthropic.com/v1/messages \
