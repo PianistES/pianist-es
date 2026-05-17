@@ -27,6 +27,7 @@ import requests
 SPACE_ID      = os.environ["CONTENTFUL_SPACE_ID"]
 ACCESS_TOKEN  = os.environ["CONTENTFUL_ACCESS_TOKEN"]
 ANTHROPIC_KEY = os.environ["ANTHROPIC_API_KEY"]
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5-20251022")
 FORCE_SLUG    = os.environ.get("FORCE_SLUG", "").strip()
 SITE_URL      = "https://pianist.es"
 
@@ -190,7 +191,7 @@ DUTCH BODY HTML:
             "content-type": "application/json",
         },
         json={
-            "model": "claude-sonnet-4-20250514",
+            "model": ANTHROPIC_MODEL,
             "max_tokens": 6000,
             "messages": [{"role": "user", "content": prompt}],
         },
