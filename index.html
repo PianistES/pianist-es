@@ -2490,8 +2490,10 @@ function openBlogPost(post) {
   document.body.style.overflow = 'hidden';
 
   // URL bijwerken voor SEO/delen (pushState zodat terug-knop werkt)
-  if (history.pushState && post.slug) {
-    history.pushState({ blogPost: post.slug }, title, `#blog/${post.slug}`);
+  if (history.pushState) {
+    const langSlugs = typeof post.slugs === 'object' ? post.slugs : {};
+    const currentSlug = langSlugs[lang] || langSlugs['nl'] || post.slug || '';
+    history.pushState({ blogPost: currentSlug }, title, `#blog/${currentSlug}`);
   }
 }
 
