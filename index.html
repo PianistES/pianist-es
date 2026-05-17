@@ -2084,7 +2084,7 @@ function setLang(lang) {
       if (translation) opt.text = translation;
     });
   }
-  buildFAQ();
+buildFAQ();
   rebuildBlogGrid();
 
   const sel = document.getElementById('pianoSelect');
@@ -2105,7 +2105,6 @@ function setLang(lang) {
   };
   const ta = document.getElementById('f_wensen');
   if (ta && placeholders[lang]) ta.placeholder = placeholders[lang];
-}
 }
 
 // ─── FAQ DATA ───
