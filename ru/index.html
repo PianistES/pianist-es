@@ -128,6 +128,13 @@
 <link rel="alternate" hreflang="fr" href="https://pianist.es/fr/">
 <link rel="alternate" hreflang="ru" href="https://pianist.es/ru/">
 <link rel="alternate" hreflang="x-default" href="https://pianist.es/">
+<link rel="alternate" hreflang="es" href="https://pianist.es/">
+<link rel="alternate" hreflang="en" href="https://pianist.es/en/">
+<link rel="alternate" hreflang="nl" href="https://pianist.es/nl/">
+<link rel="alternate" hreflang="de" href="https://pianist.es/de/">
+<link rel="alternate" hreflang="fr" href="https://pianist.es/fr/">
+<link rel="alternate" hreflang="ru" href="https://pianist.es/ru/">
+<link rel="alternate" hreflang="x-default" href="https://pianist.es/">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,700;0,900;1,400;1,700&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
@@ -1100,7 +1107,7 @@ span[data-lang].active { display: inline; }
 {
   "@context": "https://schema.org",
   "@type": "LocalBusiness",
-  "name": "Thomas Verheul – Pianist.es",
+  "name": "Pianist.es - Pianist booking in Malaga, Marbella & Spain",
   "description": "Профессиональный пианист для свадеб, вечеринок и мероприятий в Малаге, Марбелье и по всей Испании",
   "url": "https://pianist.es/ru/",
   "telephone": "+34711226882",
@@ -1614,7 +1621,7 @@ span[data-lang].active { display: inline; }
       <div class="pricing-card featured">
         <div class="pricing-badge"><span data-lang="nl">Meest gevraagd</span><span data-lang="en">Most requested</span><span data-lang="es">Más solicitado</span><span data-lang="de">Am meisten gefragt</span><span data-lang="fr">Le plus demandé</span><span data-lang="ru" class="active">Наиболее популярный</span></div>
         <h3><span data-lang="nl">Extra uren</span><span data-lang="en">Additional Hours</span><span data-lang="es">Horas Adicionales</span><span data-lang="de">Zusatzstunden</span><span data-lang="fr">Heures Supplémentaires</span><span data-lang="ru" class="active">Дополнительные часы</span></h3>
-        <div class="pricing-price"><sup>€</sup>95<span style="font-size:22px; font-weight:400;">/uur</span></div>
+        <div class="pricing-price"><sup>€</sup>95<span style="font-size:22px; font-weight:400;">/<span data-lang="nl">uur</span><span data-lang="en">hr</span><span data-lang="es">h</span><span data-lang="de">Std</span><span data-lang="fr">h</span><span data-lang="ru" class="active">ч</span></span></div>
         <div class="pricing-desc"><span data-lang="nl">Elk extra uur na het basispakket</span><span data-lang="en">Each additional hour after the base package</span><span data-lang="es">Cada hora adicional después del paquete base</span><span data-lang="de">Jede zusätzliche Stunde nach dem Basispaket</span><span data-lang="fr">Chaque heure supplémentaire après le forfait de base</span><span data-lang="ru" class="active">Каждый дополнительный час после базового пакета</span></div>
         <ul class="pricing-features">
           <li><span data-lang="nl">Reiskosten: €0,50/km vanaf Málaga</span><span data-lang="en">Travel costs: €0.50/km from Málaga</span><span data-lang="es">Gastos de viaje: €0,50/km desde Málaga</span><span data-lang="de">Reisekosten: €0,50/km ab Málaga</span><span data-lang="fr">Frais de déplacement: €0,50/km depuis Málaga</span><span data-lang="ru" class="active">Транспортные расходы: €0,50/км от Малаги</span></li>
@@ -1918,16 +1925,16 @@ span[data-lang].active { display: inline; }
             </div>
             <div class="form-group form-full">
               <label><span data-lang="nl">Piano</span><span data-lang="en">Piano</span><span data-lang="es">Piano</span><span data-lang="de">Klavier</span><span data-lang="fr">Piano</span><span data-lang="ru" class="active">Пианино</span></label>
-              <select name="piano_keuze" id="pianoSelect">
-                <option value="digitaal">Digitale piano meenemen</option>
-                <option value="piano">Piano verzorgen</option>
-                <option value="vleugel">Vleugel verzorgen</option>
-                <option value="aanwezig">Piano/vleugel aanwezig op locatie</option>
-              </select>
+            <select name="piano_keuze" id="pianoSelect">
+              <option value="digitaal" data-nl="Digitale piano meenemen" data-en="Pianist brings digital piano" data-es="Pianista trae piano digital" data-de="Digitalpiano mitbringen" data-fr="Apporter un piano numérique" data-ru="Привезти цифровое пианино">Digitale piano meenemen</option>
+              <option value="piano" data-nl="Piano verzorgen" data-en="Pianist arranges a piano" data-es="Pianista organiza un piano" data-de="Klavier organisieren" data-fr="Organiser un piano" data-ru="Организовать пианино">Piano verzorgen</option>
+              <option value="vleugel" data-nl="Vleugel verzorgen" data-en="Pianist arranges a grand piano" data-es="Pianista organiza piano de cola" data-de="Flügel organisieren" data-fr="Organiser un piano à queue" data-ru="Организовать рояль">Vleugel verzorgen</option>
+              <option value="aanwezig" data-nl="Piano/vleugel aanwezig op locatie" data-en="Piano already available at venue" data-es="Piano disponible en el lugar" data-de="Klavier vor Ort vorhanden" data-fr="Piano disponible sur place" data-ru="Пианино уже на месте">Piano/vleugel aanwezig op locatie</option>
+            </select>
             </div>
             <div class="form-group form-full">
               <label><span data-lang="nl">Wensen</span><span data-lang="en">Wishes</span><span data-lang="es">Deseos</span><span data-lang="de">Wünsche</span><span data-lang="fr">Souhaits</span><span data-lang="ru" class="active">Пожелания</span></label>
-              <textarea name="wensen" id="f_wensen" placeholder="Muziekstijl, verzoeknummers, sfeer van het evenement..."></textarea>
+            <textarea name="wensen" id="f_wensen" id="f_wensen_ta" placeholder="Muziekstijl, verzoeknummers, sfeer van het evenement..."></textarea>
             </div>
           </div>
           <button type="submit" class="form-submit" id="formSubmitBtn">
@@ -2067,7 +2074,6 @@ function setLang(lang) {
   document.querySelectorAll('[data-lang]').forEach(el => {
     el.classList.toggle('active', el.getAttribute('data-lang') === lang);
   });
-  // Update vlag + code in de knop
   const lf = langFlags[lang];
   if (lf) {
     const flagEl = document.getElementById('langCurrentFlag');
@@ -2076,16 +2082,26 @@ function setLang(lang) {
     if (codeEl) codeEl.textContent = lf.code;
   }
   document.documentElement.lang = lang;
-  // Piano select updaten
   const sel = document.getElementById('pianoSelect');
   if (sel) {
-    const opts = pianoOptions[lang] || pianoOptions.nl;
-    Array.from(sel.options).forEach((opt, i) => { if (opts[i]) opt.text = opts[i]; });
+    Array.from(sel.options).forEach(opt => {
+      const translation = opt.getAttribute('data-' + lang) || opt.getAttribute('data-nl');
+      if (translation) opt.text = translation;
+    });
   }
   buildFAQ();
   rebuildBlogGrid();
+  const placeholders = {
+    nl: 'Muziekstijl, verzoeknummers, sfeer van het evenement...',
+    en: 'Music style, song requests, atmosphere of the event...',
+    es: 'Estilo musical, canciones solicitadas, ambiente del evento...',
+    de: 'Musikstil, Musikwünsche, Atmosphäre der Veranstaltung...',
+    fr: 'Style musical, chansons demandées, ambiance de l\'événement...',
+    ru: 'Стиль музыки, заявки на песни, атмосфера мероприятия...'
+  };
+  const ta = document.getElementById('f_wensen');
+  if (ta && placeholders[lang]) ta.placeholder = placeholders[lang];
 }
-
 // ─── FAQ DATA ───
 const faqData = {
   nl: [
@@ -2490,8 +2506,10 @@ function openBlogPost(post) {
   document.body.style.overflow = 'hidden';
 
   // URL bijwerken voor SEO/delen (pushState zodat terug-knop werkt)
-  if (history.pushState && post.slug) {
-    history.pushState({ blogPost: post.slug }, title, `#blog/${post.slug}`);
+  if (history.pushState) {
+    const langSlugs = typeof post.slugs === 'object' ? post.slugs : {};
+    const currentSlug = langSlugs[lang] || langSlugs['nl'] || post.slug || '';
+    history.pushState({ blogPost: currentSlug }, title, `#blog/${currentSlug}`);
   }
 }
 
@@ -3072,7 +3090,26 @@ window.addEventListener('DOMContentLoaded', () => {
     };
   }
 });
-
+// ─── Initialiseer piano opties en placeholder bij laden ───
+document.addEventListener('DOMContentLoaded', () => {
+  const sel = document.getElementById('pianoSelect');
+  if (sel) {
+    Array.from(sel.options).forEach(opt => {
+      const translation = opt.getAttribute('data-' + currentLang) || opt.getAttribute('data-nl');
+      if (translation) opt.text = translation;
+    });
+  }
+  const placeholders = {
+    nl: 'Muziekstijl, verzoeknummers, sfeer van het evenement...',
+    en: 'Music style, song requests, atmosphere of the event...',
+    es: 'Estilo musical, canciones solicitadas, ambiente del evento...',
+    de: 'Musikstil, Musikwünsche, Atmosphäre der Veranstaltung...',
+    fr: 'Style musical, chansons demandées, ambiance de l\'événement...',
+    ru: 'Стиль музыки, заявки на песни, атмосфера мероприятия...'
+  };
+  const ta = document.getElementById('f_wensen');
+  if (ta && placeholders[currentLang]) ta.placeholder = placeholders[currentLang];
+});
 // ─── Check localStorage on load (dev mode) ───
 window.addEventListener('DOMContentLoaded', () => {
   const savedSpace = localStorage.getItem('cf_space');
